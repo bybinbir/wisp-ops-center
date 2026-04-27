@@ -19,15 +19,15 @@ type PeerCustomer struct {
 
 // APDegradationStats, peer-group analiz çıktısı.
 type APDegradationStats struct {
-	APDeviceID         string
-	TotalCustomers     int
-	CriticalCustomers  int // skor < WarningAt
-	WarningCustomers   int // WarningAt <= skor < HealthyAt
-	DegradationRatio   float64 // critical / total
-	IsCritical         bool   // ratio >= APDegradationCustomerRatioCritical
-	IsWarning          bool   // ratio >= APDegradationCustomerRatioWarning
-	AvgRSSIdBm         *float64
-	AvgSNRdB           *float64
+	APDeviceID        string
+	TotalCustomers    int
+	CriticalCustomers int     // skor < WarningAt
+	WarningCustomers  int     // WarningAt <= skor < HealthyAt
+	DegradationRatio  float64 // critical / total
+	IsCritical        bool    // ratio >= APDegradationCustomerRatioCritical
+	IsWarning         bool    // ratio >= APDegradationCustomerRatioWarning
+	AvgRSSIdBm        *float64
+	AvgSNRdB          *float64
 }
 
 // AnalyzePeerSet, AP altındaki müşterilerden agregasyon üretir.

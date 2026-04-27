@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/wisp-ops-center/wisp-ops-center/internal/audit"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scoring"
 )
 
@@ -133,6 +134,10 @@ func (s *Server) handleCalculateScore(w http.ResponseWriter, r *http.Request, cu
 }
 
 // handleCreateWorkOrderFromScore, son skor → work_order_candidates satırı.
+//
+// Sadece warning/critical skorlar aday üretebilir. Aynı müşteri+tanı için
+// halihazırda açık bir aday varsa duplicate=true ile mevcut id döner; yeni
+// satır YARATILMAZ. Tüm sonuçlar audit'e yazılır.
 func (s *Server) handleCreateWorkOrderFromScore(w http.ResponseWriter, r *http.Request, customerID string) {
 	row, err := s.scoring.LatestCustomerScore(r.Context(), customerID)
 	if err != nil {
@@ -143,6 +148,15 @@ func (s *Server) handleCreateWorkOrderFromScore(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
 		return
 	}
+	if row.Severity != string(scoring.SeverityWarning) &&
+		row.Severity != string(scoring.SeverityCritical) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error": "score_severity_not_actionable",
+			"hint":  "Yalnızca warning/critical skorlar iş emri adayı üretebilir.",
+		})
+		return
+	}
+
 	cust := customerID
 	in := scoring.CreateWorkOrderCandidateInput{
 		CustomerID:        &cust,
@@ -154,19 +168,38 @@ func (s *Server) handleCreateWorkOrderFromScore(w http.ResponseWriter, r *http.R
 		Severity:          row.Severity,
 		Reasons:           row.Reasons,
 	}
-	id, err := s.scoring.CreateWorkOrderCandidate(r.Context(), in)
+	out, err := s.scoring.CreateWorkOrderCandidate(r.Context(), in)
 	if err != nil {
 		s.log.Warn("woc_create_failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"data": map[string]any{
-		"id":                 id,
+	s.audit(r.Context(), audit.Entry{
+		Actor:   actor(r),
+		Action:  "work_order_candidate.created",
+		Subject: "customer:" + customerID,
+		Outcome: audit.OutcomeSuccess,
+		Reason:  row.Diagnosis,
+		Metadata: map[string]any{
+			"candidate_id": out.ID,
+			"diagnosis":    row.Diagnosis,
+			"severity":     row.Severity,
+			"duplicate":    out.Duplicate,
+			"score":        row.Score,
+		},
+	})
+	status := http.StatusCreated
+	if out.Duplicate {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, map[string]any{"data": map[string]any{
+		"id":                 out.ID,
 		"customer_id":        customerID,
 		"diagnosis":          row.Diagnosis,
 		"recommended_action": row.RecommendedAction,
 		"severity":           row.Severity,
 		"status":             "open",
+		"duplicate":          out.Duplicate,
 	}})
 }
 
@@ -215,11 +248,11 @@ func (s *Server) handleCustomersWithIssues(w http.ResponseWriter, r *http.Reques
 // =====================================================================
 
 type scoringRunRequest struct {
-	CustomerIDs   []string `json:"customer_ids"`
-	AllCustomers  bool     `json:"all_customers"`
-	AllAPs        bool     `json:"all_aps"`
-	AllTowers     bool     `json:"all_towers"`
-	MaxCustomers  int      `json:"max_customers"`
+	CustomerIDs  []string `json:"customer_ids"`
+	AllCustomers bool     `json:"all_customers"`
+	AllAPs       bool     `json:"all_aps"`
+	AllTowers    bool     `json:"all_towers"`
+	MaxCustomers int      `json:"max_customers"`
 }
 
 type scoringRunResponse struct {
@@ -315,7 +348,25 @@ func (s *Server) handleScoringThresholds(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if req.By == "" {
-			req.By = "api"
+			req.By = actor(r)
+		}
+		// Validate keys + ranges before persisting any.
+		invalid := []string{}
+		for k, v := range req.Updates {
+			if !scoring.IsKnownThresholdKey(k) {
+				invalid = append(invalid, k+":unknown_key")
+				continue
+			}
+			if !scoring.IsValidThresholdValue(k, v) {
+				invalid = append(invalid, k+":out_of_range")
+			}
+		}
+		if len(invalid) > 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"error":   "invalid_threshold",
+				"details": invalid,
+			})
+			return
 		}
 		updated := 0
 		for k, v := range req.Updates {
@@ -324,6 +375,16 @@ func (s *Server) handleScoringThresholds(w http.ResponseWriter, r *http.Request)
 				continue
 			}
 			updated++
+			s.audit(r.Context(), audit.Entry{
+				Actor:   req.By,
+				Action:  "scoring_threshold.updated",
+				Subject: "threshold:" + k,
+				Outcome: audit.OutcomeSuccess,
+				Metadata: map[string]any{
+					"key":   k,
+					"value": v,
+				},
+			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"data": map[string]any{"updated": updated},

@@ -6,7 +6,7 @@ WISP operasyon karar platformu. Genel bir cihaz yönetim paneli **değildir**.
 
 ## Faz Durumu
 
-**Aktif faz:** **Faz 5 — Scheduled checks engine + güvenli AP→Client testleri.** Faz 1-4 tamamlandı.
+**Aktif faz:** **Faz 6 — Customer Signal Scoring + Problem Customer Detection.** Faz 1-5 tamamlandı.
 
 Tam yol haritası: `TASK_BOARD.md`.
 
@@ -37,10 +37,17 @@ wisp-ops-center/
   migrations/    000001_initial_schema.sql
                  000002_phase2_inventory_hardening.sql
                  000003_mikrotik_readonly.sql
+                 000004_mimosa_readonly_and_credentials.sql
+                 000005_scheduled_checks_ap_client_tests.sql
+                 000006_customer_signal_scoring.sql
   docs/          ARCHITECTURE / DATA_MODEL / DEVICE_CAPABILITY_MODEL
                  SCORING_MODEL / SCHEDULER_MODEL / SAFETY_MODEL
                  AP_CLIENT_TEST_ENGINE / GITHUB_WORKFLOW
-                 MIKROTIK_READONLY_INTEGRATION / VAULT_ROTATION
+                 MIKROTIK_READONLY_INTEGRATION / MIMOSA_READONLY_INTEGRATION
+                 SCHEDULED_CHECKS_ENGINE / AP_CLIENT_TESTS_RUNTIME
+                 MAINTENANCE_WINDOWS / SSH_HOST_KEY_POLICY
+                 CUSTOMER_SIGNAL_SCORING / PROBLEM_CUSTOMER_DETECTION
+                 WORK_ORDER_CANDIDATES / VAULT_ROTATION
   infra/         nginx, systemd, prometheus
   scripts/       dev_run_*, db_migrate
 ```
@@ -111,6 +118,33 @@ npm run build
 | `LOG_FORMAT` | text / json | hayır |
 | `NEXT_PUBLIC_API_BASE` | Web tarafının API hedefi | hayır |
 | `NEXT_PUBLIC_API_TOKEN` | Web → API bearer token | API token açıksa |
+
+## Faz 6'da Yapılan
+
+- `internal/scoring`: deterministik kural tabanlı skor motoru (engine,
+  thresholds, diagnosis, actions, ap_degradation, trend, hydrator, repository).
+  ML kullanılmaz, fake skor üretilmez; veri yoksa `data_insufficient` döner.
+- 12 tanı + 10 önerilen aksiyon kategorisi sıralı karar ağacı.
+- Migration 000006: `scoring_thresholds`, `customer_signal_scores`,
+  `ap_health_scores`, `tower_risk_scores`, `work_order_candidates`,
+  `customers.last_signal_*` cache.
+- API: `POST /scoring/run`, `GET/PATCH /scoring-thresholds` (key+range
+  validation, audit), `POST /customers/{id}/calculate-score`,
+  `GET /customers/{id}/signal-score`, `GET /customers/{id}/signal-history`,
+  `GET /customers-with-issues`, `GET /devices/{id}/ap-health`,
+  `GET /towers/{id}/risk-score`, `GET/PATCH /work-order-candidates(/{id})`,
+  `POST /customers/{id}/create-work-order-from-score` (duplicate guard).
+- Worker: `customer_signal_check` handler — hydrate → engine → save döngüsü.
+- Transport hardening kapanışı: SSH host key TOFU/Pinned **runtime
+  enforcement** (mikrotik adapter `Dial` çağrısında `EnforcePolicy`),
+  RouterOS API **TLS verify runtime tüketimi** (`InsecureSkipVerify =
+  !VerifyTLS`).
+- Frontend: gerçek **Sorunlu Müşteriler** tablosu (filtre + skor yenile +
+  iş emri adayı), `/musteriler/[id]` müşteri detay (skor, evidence,
+  geçmiş, aday listesi), Dashboard real kart sayıları, Ayarlar — Skor
+  Eşikleri, Kuleler risk badge, Cihaz detay AP-health kartı.
+- Dokümantasyon: `CUSTOMER_SIGNAL_SCORING.md`,
+  `PROBLEM_CUSTOMER_DETECTION.md`, `WORK_ORDER_CANDIDATES.md`.
 
 ## Faz 5'te Yapılan
 

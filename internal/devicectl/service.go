@@ -67,13 +67,13 @@ SELECT id, name, vendor, role, host(ip)
 }
 
 type credentialLookup struct {
-	authType            string
-	username            string
-	port                *int
-	cipherText          []byte
-	profileID           string
-	tlsVerify           bool
-	sshHostKeyPolicy    string
+	authType              string
+	username              string
+	port                  *int
+	cipherText            []byte
+	profileID             string
+	tlsVerify             bool
+	sshHostKeyPolicy      string
 	sshHostKeyFingerprint string
 }
 

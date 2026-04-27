@@ -137,11 +137,11 @@ func (h *Hydrator) cpeDeviceIDs(ctx context.Context, customerID string) ([]strin
 
 // wirelessSample, ortak yapı.
 type wirelessSample struct {
-	RSSIdBm    *float64
-	SNRdB      *float64
-	CCQ        *float64
-	TxRateMbps *float64
-	RxRateMbps *float64
+	RSSIdBm     *float64
+	SNRdB       *float64
+	CCQ         *float64
+	TxRateMbps  *float64
+	RxRateMbps  *float64
 	CollectedAt time.Time
 }
 
@@ -222,8 +222,8 @@ func (h *Hydrator) latestAPClientTest(ctx context.Context, customerID string) (I
 		LIMIT 1`, customerID)
 	var (
 		lat, latMax, loss, jitter *float64
-		ok bool
-		execAt time.Time
+		ok                        bool
+		execAt                    time.Time
 	)
 	if err := row.Scan(&lat, &latMax, &loss, &jitter, &ok, &execAt); err != nil {
 		return Inputs{}, nil, false

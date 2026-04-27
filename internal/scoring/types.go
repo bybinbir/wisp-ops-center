@@ -87,21 +87,21 @@ type Inputs struct {
 
 // Result, tek bir müşteri (veya birim) için üretilen skordur.
 type Result struct {
-	Score             int       // 0..100 (yüksek iyi)
-	Severity          Severity  // healthy / warning / critical / unknown
-	Diagnosis         Diagnosis // 12 kategoriden biri
-	RecommendedAction Action    // 10 kategoriden biri
-	Reasons           []string  // operatörün okuyabileceği açıklamalar
+	Score               int                // 0..100 (yüksek iyi)
+	Severity            Severity           // healthy / warning / critical / unknown
+	Diagnosis           Diagnosis          // 12 kategoriden biri
+	RecommendedAction   Action             // 10 kategoriden biri
+	Reasons             []string           // operatörün okuyabileceği açıklamalar
 	ContributingMetrics map[string]float64 // skoru etkileyen ölçüm değerleri (-X puan)
-	CalculatedAt      time.Time
-	IsStale           bool
+	CalculatedAt        time.Time
+	IsStale             bool
 }
 
 // APInputs, AP cihaz seviyesinde özet skor hesaplamasının girdileridir.
 type APInputs struct {
 	APDeviceID            string
-	CustomerScores        []int    // bu AP'ye bağlı tüm müşterilerin skorları
-	CriticalCustomerCount int      // skoru critical olan
+	CustomerScores        []int // bu AP'ye bağlı tüm müşterilerin skorları
+	CriticalCustomerCount int   // skoru critical olan
 	WarningCustomerCount  int
 	HealthyCustomerCount  int
 	AvgRSSIdBm            *float64 // peer ortalaması
@@ -111,23 +111,23 @@ type APInputs struct {
 
 // APResult, AP düzey skoru.
 type APResult struct {
-	APDeviceID            string
-	APScore               int
-	Severity              Severity
-	DegradationRatio      float64 // critical / total
-	IsAPWideInterference  bool
-	Reasons               []string
-	CalculatedAt          time.Time
+	APDeviceID           string
+	APScore              int
+	Severity             Severity
+	DegradationRatio     float64 // critical / total
+	IsAPWideInterference bool
+	Reasons              []string
+	CalculatedAt         time.Time
 }
 
 // LinkInputs, PtP/PtMP backhaul link skorlama girdileri.
 type LinkInputs struct {
-	LinkID            string
-	SignalA, SignalB  *float64 // dBm her iki uç
-	SNRA, SNRB        *float64
-	CapacityRatio     *float64 // taşınan / nominal
+	LinkID             string
+	SignalA, SignalB   *float64 // dBm her iki uç
+	SNRA, SNRB         *float64
+	CapacityRatio      *float64 // taşınan / nominal
 	LossPctA, LossPctB *float64
-	HasFreshTelemetry bool
+	HasFreshTelemetry  bool
 }
 
 // LinkResult, PtP link skoru.
@@ -142,12 +142,12 @@ type LinkResult struct {
 
 // TowerInputs, kule risk skorlamasının girdileri (alt birimlerin agregasyonu).
 type TowerInputs struct {
-	TowerID                   string
-	APResults                 []APResult
-	LinkResults               []LinkResult
-	CustomerCriticalCount     int
-	CustomerWarningCount      int
-	CustomerTotal             int
+	TowerID               string
+	APResults             []APResult
+	LinkResults           []LinkResult
+	CustomerCriticalCount int
+	CustomerWarningCount  int
+	CustomerTotal         int
 }
 
 // TowerResult, kule operasyonel risk skoru.

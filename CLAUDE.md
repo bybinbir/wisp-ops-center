@@ -1,24 +1,59 @@
-# wisp-ops-center
+CLAUDE.md PROMPT
 
-Bu wispops projesinin ana kod deposu. Stack: Go (backend) + Next.js / TypeScript (web). Detaylı bağlam: `..\.claude_memory\projects\wispops.md`.
+F:\WispOps\wisp-ops-center\ projesi için mevcut repo durumunu okuyarak kısa, net ve uygulanabilir bir CLAUDE.md dosyası oluştur.
 
-## Üst Workspace Talimatları
+Bağlam:
+- Proje adı: wisp-ops-center
+- Amaç: MikroTik + Mimosa tabanlı WISP ağları için operasyon karar platformu.
+- Ana soru: “Bugün ağda ne bozuk, kime müdahale etmeliyim, hangi link riskli?”
+- Faz 1-5 tamamlandı.
+- Aktif faz: Faz 6 — Customer Signal Scoring + Problem Customer Detection.
+- Kalan fazlar: Faz 7 Reports + Work Orders, Faz 8 Frequency Recommendations, Faz 9 Controlled Apply + Rollback, Faz 10 Production Hardening.
 
-Workspace kökündeki talimatlar geçerli: `..\CLAUDE.md`. Hafıza dosyaları `..\.claude_memory\` altında. **Oturum başında onları oku.**
+CLAUDE.md kısa olmalı. Roman yazma. Maksimum 1-2 ekranlık net proje anayasası olsun.
 
-## Hızlı Yapı
+İçerik başlıkları:
+1. Project Identity
+2. Current State
+3. Active Phase
+4. Non-Negotiable Safety Rules
+5. Tech Stack
+6. Git Workflow
+7. Quality Gates
+8. Phase 6 Focus
+9. Final Report Format
 
-- `apps/api/` — REST API
-- `apps/worker/` — arka plan işçisi
-- `apps/web/` — Next.js arayüz
-- `internal/` — paylaşılan paketler (adapters, devices, links, scoring, vb.)
-- `migrations/` — PostgreSQL şema migration'ları
-- `infra/` — nginx, systemd, prometheus konfigürasyonları
-- `docs/` — mimari dokümanlar
+Zorunlu kurallar:
+- Soru sorma, onay isteme.
+- Repo’yu baştan kurma; mevcut dosyaları oku ve devam et.
+- Main branch üzerinde çalışma.
+- Her fazda ayrı branch kullan.
+- Fake telemetry, fake score, fake success yasak.
+- Cihaz config write, frequency apply, scan activation, bandwidth-test, Mimosa write yasak.
+- Telemetri yoksa data_insufficient dön.
+- Secret’ları log/API/audit/docs/commit içine yazma.
+- Her mutating action audit edilmeli.
+- Test/build geçmeden tamamlandı deme.
 
-## Geliştirme Komutları
+Faz 6 odağı:
+- customer wireless health score
+- AP health score
+- tower risk score
+- sorunlu müşteri tespiti
+- AP-wide degradation
+- CPE alignment diagnosis
+- work-order candidates
+- scoring thresholds
+- Sorunlu Müşteriler ekranının gerçek veriyle çalışması
+- SSH host key enforcement ve RouterOS TLS verify runtime kapanışı
 
-- `scripts/dev_run_api.sh` — API'yi yerel çalıştır
-- `scripts/dev_run_worker.sh` — worker'ı çalıştır
-- `scripts/dev_run_web.sh` — web'i çalıştır
-- `scripts/db_migrate.sh` — migration'ları uygula
+Kalite komutları:
+- gofmt -l .
+- go vet ./...
+- go test ./...
+- go build ./...
+- npx tsc --noEmit
+- npm run build
+
+Teslim:
+Sadece CLAUDE.md içeriğini üret.

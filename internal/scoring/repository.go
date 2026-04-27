@@ -241,16 +241,16 @@ type CustomerWithIssuesFilter struct {
 
 // CustomerWithIssueRow, problem müşteri listeleme satırı (joined view).
 type CustomerWithIssueRow struct {
-	CustomerID         string     `json:"customer_id"`
-	CustomerName       string     `json:"customer_name"`
-	APDeviceID         *string    `json:"ap_device_id,omitempty"`
-	TowerID            *string    `json:"tower_id,omitempty"`
-	Score              int        `json:"score"`
-	Severity           string     `json:"severity"`
-	Diagnosis          string     `json:"diagnosis"`
-	RecommendedAction  string     `json:"recommended_action"`
-	IsStale            bool       `json:"is_stale"`
-	CalculatedAt       time.Time  `json:"calculated_at"`
+	CustomerID        string    `json:"customer_id"`
+	CustomerName      string    `json:"customer_name"`
+	APDeviceID        *string   `json:"ap_device_id,omitempty"`
+	TowerID           *string   `json:"tower_id,omitempty"`
+	Score             int       `json:"score"`
+	Severity          string    `json:"severity"`
+	Diagnosis         string    `json:"diagnosis"`
+	RecommendedAction string    `json:"recommended_action"`
+	IsStale           bool      `json:"is_stale"`
+	CalculatedAt      time.Time `json:"calculated_at"`
 }
 
 // CustomersWithIssues, "Sorunlu Müşteriler" listesini üretir.
@@ -347,13 +347,13 @@ func (r *Repository) LatestAPScore(ctx context.Context, apDeviceID string) (map[
 		WHERE ap_device_id = $1
 		ORDER BY calculated_at DESC LIMIT 1`, apDeviceID)
 	var (
-		dev string
+		dev                               string
 		score, total, crit, warn, healthy int
-		sev string
-		ratio float64
-		apw bool
-		reasonsRaw []byte
-		calc time.Time
+		sev                               string
+		ratio                             float64
+		apw                               bool
+		reasonsRaw                        []byte
+		calc                              time.Time
 	)
 	err := row.Scan(&dev, &score, &sev, &total, &crit, &warn, &healthy, &ratio, &apw, &reasonsRaw, &calc)
 	if err != nil {
@@ -399,10 +399,10 @@ func (r *Repository) LatestTowerScore(ctx context.Context, towerID string) (map[
 		WHERE tower_id = $1
 		ORDER BY calculated_at DESC LIMIT 1`, towerID)
 	var (
-		dev, sev string
-		score int
+		dev, sev   string
+		score      int
 		reasonsRaw []byte
-		calc time.Time
+		calc       time.Time
 	)
 	if err := row.Scan(&dev, &score, &sev, &reasonsRaw, &calc); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -427,20 +427,20 @@ func (r *Repository) LatestTowerScore(ctx context.Context, towerID string) (map[
 
 // WorkOrderCandidateRow, work_order_candidates satırı.
 type WorkOrderCandidateRow struct {
-	ID                   string     `json:"id"`
-	CustomerID           *string    `json:"customer_id,omitempty"`
-	APDeviceID           *string    `json:"ap_device_id,omitempty"`
-	TowerID              *string    `json:"tower_id,omitempty"`
-	SourceScoreID        *string    `json:"source_score_id,omitempty"`
-	Diagnosis            string     `json:"diagnosis"`
-	RecommendedAction    string     `json:"recommended_action"`
-	Severity             string     `json:"severity"`
-	Reasons              []string   `json:"reasons"`
-	Status               string     `json:"status"`
-	Notes                *string    `json:"notes,omitempty"`
-	PromotedWorkOrderID  *string    `json:"promoted_work_order_id,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                  string    `json:"id"`
+	CustomerID          *string   `json:"customer_id,omitempty"`
+	APDeviceID          *string   `json:"ap_device_id,omitempty"`
+	TowerID             *string   `json:"tower_id,omitempty"`
+	SourceScoreID       *string   `json:"source_score_id,omitempty"`
+	Diagnosis           string    `json:"diagnosis"`
+	RecommendedAction   string    `json:"recommended_action"`
+	Severity            string    `json:"severity"`
+	Reasons             []string  `json:"reasons"`
+	Status              string    `json:"status"`
+	Notes               *string   `json:"notes,omitempty"`
+	PromotedWorkOrderID *string   `json:"promoted_work_order_id,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // CreateWorkOrderCandidateInput, oluşturma girdisi.
@@ -456,8 +456,45 @@ type CreateWorkOrderCandidateInput struct {
 	Notes             *string
 }
 
+// CreateCandidateOutcome, oluşturma çıktısıdır. Eğer aynı müşteri+tanı için
+// halihazırda açık bir aday varsa Duplicate=true, ID o aday döner.
+type CreateCandidateOutcome struct {
+	ID        string
+	Duplicate bool
+}
+
 // CreateWorkOrderCandidate, yeni iş emri adayı ekler.
-func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWorkOrderCandidateInput) (string, error) {
+//
+// Faz 6 — Duplicate guard: aynı customer_id + diagnosis için status='open'
+// olan bir aday varsa yenisi oluşturulmaz; mevcut adayın id'si döner ve
+// Outcome.Duplicate=true işaretlenir. severity 'critical' / 'warning'
+// dışındaysa hata döner (yalnızca sorunlu skorlar aday üretir).
+func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWorkOrderCandidateInput) (CreateCandidateOutcome, error) {
+	if in.Severity != string(SeverityWarning) && in.Severity != string(SeverityCritical) {
+		return CreateCandidateOutcome{}, errors.New("scoring: only warning/critical severities can create work order candidates")
+	}
+	if in.Diagnosis == "" {
+		return CreateCandidateOutcome{}, errors.New("scoring: diagnosis required")
+	}
+
+	// Duplicate guard — yalnızca müşteri bazlı (en yaygın akış).
+	if in.CustomerID != nil && *in.CustomerID != "" {
+		var existing string
+		err := r.P.QueryRow(ctx, `
+			SELECT id::text FROM work_order_candidates
+			 WHERE customer_id = $1::uuid
+			   AND diagnosis  = $2
+			   AND status     = 'open'
+			 ORDER BY created_at DESC
+			 LIMIT 1`, *in.CustomerID, in.Diagnosis).Scan(&existing)
+		if err == nil && existing != "" {
+			return CreateCandidateOutcome{ID: existing, Duplicate: true}, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return CreateCandidateOutcome{}, err
+		}
+	}
+
 	reasonsJSON, _ := json.Marshal(in.Reasons)
 	var id string
 	err := r.P.QueryRow(ctx, `
@@ -472,7 +509,10 @@ func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWork
 		strOrEmpty(in.TowerID), strOrEmpty(in.SourceScoreID),
 		in.Diagnosis, in.RecommendedAction, in.Severity,
 		string(reasonsJSON), in.Notes).Scan(&id)
-	return id, err
+	if err != nil {
+		return CreateCandidateOutcome{}, err
+	}
+	return CreateCandidateOutcome{ID: id, Duplicate: false}, nil
 }
 
 // ListWorkOrderCandidates, açık (open) adayları döner.

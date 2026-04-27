@@ -1,4 +1,5 @@
 import { CredentialsClient } from "./Client";
+import { ScoringThresholdsClient } from "./ScoringThresholds";
 import { PageHeader } from "@/components/PageHeader";
 
 export default function SettingsPage() {
@@ -6,9 +7,10 @@ export default function SettingsPage() {
     <div>
       <PageHeader
         title="Ayarlar"
-        subtitle="Kimlik bilgileri, eşikler ve bildirim ayarları."
+        subtitle="Kimlik bilgileri, skor eşikleri ve bildirim ayarları."
       />
       <CredentialsClient />
+      <ScoringThresholdsClient />
     </div>
   );
 }

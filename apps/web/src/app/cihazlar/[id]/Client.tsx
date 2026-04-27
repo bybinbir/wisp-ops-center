@@ -7,7 +7,8 @@ import {
   PollResult,
   PollSnapshot,
   ProbeResult,
-  ApiError
+  ApiError,
+  APHealthRow
 } from "@/lib/api";
 import { Button, Toolbar } from "@/components/Toolbar";
 import { CredentialPanel } from "./CredentialPanel";
@@ -42,6 +43,7 @@ export function DeviceDetailClient({ deviceId }: { deviceId: string }) {
   const [busy, setBusy] = useState<"" | "probe" | "poll">("");
   const [lastProbe, setLastProbe] = useState<ProbeResult | null>(null);
   const [lastPoll, setLastPoll] = useState<PollSnapshot | null>(null);
+  const [apHealth, setApHealth] = useState<APHealthRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -65,6 +67,15 @@ export function DeviceDetailClient({ deviceId }: { deviceId: string }) {
       setClients(c.data ?? []);
       setIfaces(i.data ?? []);
       setHistory((h.data ?? []).filter((r) => r.device_id === deviceId).slice(0, 20));
+      // AP-health is best-effort: tüm cihazlar AP değil; 404 sessizce yok sayılır.
+      try {
+        const ap = await api.get<{ data: APHealthRow }>(
+          `/api/v1/devices/${deviceId}/ap-health`
+        );
+        setApHealth(ap.data);
+      } catch {
+        setApHealth(null);
+      }
     } catch (e) {
       const msg =
         e instanceof ApiError && e.status === 503
@@ -164,6 +175,64 @@ export function DeviceDetailClient({ deviceId }: { deviceId: string }) {
       </Toolbar>
 
       {error ? <div className="banner">{error}</div> : null}
+
+      {apHealth ? (
+        <section className="section">
+          <h3 className="section-title">AP Sağlık Skoru (Faz 6)</h3>
+          <div className="cards">
+            <div className="card">
+              <p className="card-title">AP Skoru</p>
+              <p
+                className="card-value"
+                style={{
+                  color:
+                    apHealth.severity === "critical"
+                      ? "#ff6b6b"
+                      : apHealth.severity === "warning"
+                        ? "#f4b400"
+                        : "#4caf50",
+                }}
+              >
+                {apHealth.ap_score}
+              </p>
+              <div className="card-meta">{apHealth.severity.toUpperCase()}</div>
+            </div>
+            <div className="card">
+              <p className="card-title">Etkilenen Müşteri</p>
+              <p className="card-value">
+                {apHealth.critical_customers + apHealth.warning_customers}
+              </p>
+              <div className="card-meta">
+                {apHealth.critical_customers} kritik /{" "}
+                {apHealth.warning_customers} uyarı /{" "}
+                {apHealth.healthy_customers} sağlıklı / toplam{" "}
+                {apHealth.total_customers}
+              </div>
+            </div>
+            <div className="card">
+              <p className="card-title">AP-Wide Tanı</p>
+              <p className="card-value" style={{ fontSize: 14 }}>
+                {apHealth.is_ap_wide_interference
+                  ? "AP geneli kötüleşme"
+                  : "Tek müşteri sorunu olabilir"}
+              </p>
+              <div className="card-meta">
+                degradation_ratio = {apHealth.degradation_ratio.toFixed(2)}
+              </div>
+              <div className="card-meta">
+                {new Date(apHealth.calculated_at).toLocaleString("tr-TR")}
+              </div>
+            </div>
+          </div>
+          {apHealth.reasons && apHealth.reasons.length > 0 ? (
+            <ul style={{ marginTop: 8, fontSize: 13 }}>
+              {apHealth.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="cards">
         <div className="card">

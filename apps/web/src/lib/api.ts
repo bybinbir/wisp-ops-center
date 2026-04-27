@@ -153,3 +153,134 @@ export const SSH_HOST_KEY_POLICIES = [
 ] as const;
 export const TRANSPORTS = ["api-ssl", "ssh", "snmp", "vendor-api"] as const;
 export const CRED_PURPOSES = ["primary", "api", "ssh", "snmp", "fallback"] as const;
+
+// ─── Faz 6 — Customer Signal Scoring ─────────────────────────────────────
+
+export const DIAGNOSES = [
+  "healthy",
+  "weak_customer_signal",
+  "possible_cpe_alignment_issue",
+  "ap_wide_interference",
+  "ptp_link_degradation",
+  "frequency_channel_risk",
+  "high_latency",
+  "packet_loss",
+  "unstable_jitter",
+  "device_offline",
+  "stale_data",
+  "data_insufficient",
+] as const;
+export type Diagnosis = (typeof DIAGNOSES)[number];
+
+export const SEVERITIES = ["healthy", "warning", "critical", "unknown"] as const;
+export type Severity = (typeof SEVERITIES)[number];
+
+export const DIAGNOSIS_LABELS: Record<Diagnosis, string> = {
+  healthy: "Sağlıklı",
+  weak_customer_signal: "Zayıf Müşteri Sinyali",
+  possible_cpe_alignment_issue: "CPE Yönlendirme Sorunu",
+  ap_wide_interference: "AP Genelinde Parazit",
+  ptp_link_degradation: "PtP Link Kötüleşmesi",
+  frequency_channel_risk: "Frekans/Kanal Riski",
+  high_latency: "Yüksek Gecikme",
+  packet_loss: "Paket Kaybı",
+  unstable_jitter: "Kararsız Jitter",
+  device_offline: "Cihaz Çevrimdışı",
+  stale_data: "Veri Bayat",
+  data_insufficient: "Yetersiz Veri",
+};
+
+export const ACTION_LABELS: Record<string, string> = {
+  no_action: "Aksiyon gerekmiyor",
+  monitor: "Gözlem",
+  schedule_field_visit: "Saha ziyareti planla",
+  check_cpe_alignment: "CPE anten yönü kontrol",
+  check_customer_cable: "Müşteri kablo/Ethernet kontrol",
+  check_ap_interference: "AP parazit ölçümü",
+  check_ptp_backhaul: "PtP backhaul kontrolü",
+  review_frequency_plan: "Frekans planı gözden geçir",
+  verify_power_or_ethernet: "Güç / Ethernet doğrulama",
+  escalate_network_ops: "Network Ops'a yükselt",
+};
+
+export type CustomerWithIssue = {
+  customer_id: string;
+  customer_name: string;
+  ap_device_id?: string;
+  tower_id?: string;
+  score: number;
+  severity: Severity;
+  diagnosis: Diagnosis;
+  recommended_action: string;
+  is_stale: boolean;
+  calculated_at: string;
+};
+
+export type CustomerSignalScore = {
+  id: string;
+  customer_id: string;
+  ap_device_id?: string;
+  tower_id?: string;
+  score: number;
+  severity: Severity;
+  diagnosis: Diagnosis;
+  recommended_action: string;
+  reasons: string[];
+  contributing_metrics?: Record<string, number>;
+  rssi_dbm?: number | null;
+  snr_db?: number | null;
+  ccq?: number | null;
+  packet_loss_pct?: number | null;
+  avg_latency_ms?: number | null;
+  jitter_ms?: number | null;
+  signal_trend_7d?: number | null;
+  is_stale: boolean;
+  calculated_at: string;
+};
+
+export type ScoringThreshold = {
+  key: string;
+  value: number;
+  description?: string;
+  updated_at: string;
+  updated_by?: string | null;
+};
+
+export type WorkOrderCandidate = {
+  id: string;
+  customer_id?: string | null;
+  ap_device_id?: string | null;
+  tower_id?: string | null;
+  source_score_id?: string | null;
+  diagnosis: string;
+  recommended_action: string;
+  severity: Severity;
+  reasons: string[];
+  status: "open" | "dismissed" | "promoted";
+  notes?: string | null;
+  promoted_work_order_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type APHealthRow = {
+  ap_device_id: string;
+  ap_score: number;
+  severity: Severity;
+  total_customers: number;
+  critical_customers: number;
+  warning_customers: number;
+  healthy_customers: number;
+  degradation_ratio: number;
+  is_ap_wide_interference: boolean;
+  reasons: string[];
+  calculated_at: string;
+};
+
+export type TowerRiskRow = {
+  tower_id: string;
+  risk_score: number;
+  severity: Severity;
+  reasons: string[];
+  calculated_at: string;
+};

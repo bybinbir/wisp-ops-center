@@ -7,18 +7,18 @@ import "time"
 //
 // Karar ağacı:
 //
-//	1. data_insufficient   → RSSI/SNR ve test verisi yoksa
-//	2. stale_data          → en son örnek/test çok eski
-//	3. device_offline      → LastTestSuccess=false + telemetri ölü
-//	4. ap_wide_interference → AP geneli kötüleşme oranı eşik üstü
-//	5. ptp_link_degradation → PtP backhaul yüklü/zayıf
-//	6. weak_customer_signal → RSSI critical
-//	7. possible_cpe_alignment_issue → SNR çok düşük (alignment kaybı işareti)
-//	8. frequency_channel_risk → SNR sınır (parazit/kanal sorunu)
-//	9. high_latency        → AP→Client testte gecikme kritik
-//	10. packet_loss        → AP→Client testte loss kritik
-//	11. unstable_jitter    → AP→Client testte jitter kritik
-//	12. healthy            → tüm sinyaller iyi
+//  1. data_insufficient   → RSSI/SNR ve test verisi yoksa
+//  2. stale_data          → en son örnek/test çok eski
+//  3. device_offline      → LastTestSuccess=false + telemetri ölü
+//  4. ap_wide_interference → AP geneli kötüleşme oranı eşik üstü
+//  5. ptp_link_degradation → PtP backhaul yüklü/zayıf
+//  6. weak_customer_signal → RSSI critical
+//  7. possible_cpe_alignment_issue → SNR çok düşük (alignment kaybı işareti)
+//  8. frequency_channel_risk → SNR sınır (parazit/kanal sorunu)
+//  9. high_latency        → AP→Client testte gecikme kritik
+//  10. packet_loss        → AP→Client testte loss kritik
+//  11. unstable_jitter    → AP→Client testte jitter kritik
+//  12. healthy            → tüm sinyaller iyi
 func (t Thresholds) Classify(in Inputs, now time.Time) Diagnosis {
 	// 1. Yetersiz veri
 	if in.RSSIdBm == nil && in.SNRdB == nil &&

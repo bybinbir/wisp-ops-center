@@ -105,18 +105,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
 		"service":    "wisp-ops-api",
-		"phase":      5,
+		"phase":      6,
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"go_version": runtime.Version(),
 		"db":         dbStatus,
 		"vault":      vaultStatus,
 		"safety": map[string]any{
-			"write_disabled":           true,
-			"frequency_apply_blocked":  true,
-			"mimosa_readonly_only":     true,
-			"mikrotik_readonly_only":   true,
-			"high_risk_tests_blocked":  true,
-			"controlled_apply_blocked": true,
+			"write_disabled":              true,
+			"frequency_apply_blocked":     true,
+			"mimosa_readonly_only":        true,
+			"mikrotik_readonly_only":      true,
+			"high_risk_tests_blocked":     true,
+			"controlled_apply_blocked":    true,
+			"scoring_is_rule_based_no_ml": true,
+			"work_orders_candidate_only":  true,
 		},
 	})
 }
@@ -128,13 +130,19 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "wisp-ops-center API",
-		"phase":   5,
+		"phase":   6,
 		"routes": []string{
 			"/api/v1/health",
 			"/api/v1/sites",
 			"/api/v1/towers",
+			"/api/v1/towers/{id}/risk-score",
 			"/api/v1/links",
 			"/api/v1/customers",
+			"/api/v1/customers/{id}/calculate-score",
+			"/api/v1/customers/{id}/signal-score",
+			"/api/v1/customers/{id}/signal-history",
+			"/api/v1/customers/{id}/create-work-order-from-score",
+			"/api/v1/customers-with-issues",
 			"/api/v1/devices",
 			"/api/v1/devices/{id}",
 			"/api/v1/devices/{id}/probe",
@@ -145,6 +153,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"/api/v1/devices/{id}/mimosa/latest",
 			"/api/v1/devices/{id}/credentials",
 			"/api/v1/devices/{id}/credentials/{credential_profile_id}",
+			"/api/v1/devices/{id}/ap-health",
 			"/api/v1/credential-profiles",
 			"/api/v1/credential-profiles/{id}",
 			"/api/v1/scheduled-checks",
@@ -160,6 +169,10 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"/api/v1/audit-logs",
 			"/api/v1/mikrotik/poll-results",
 			"/api/v1/mimosa/poll-results",
+			"/api/v1/scoring/run",
+			"/api/v1/scoring-thresholds",
+			"/api/v1/work-order-candidates",
+			"/api/v1/work-order-candidates/{id}",
 		},
 	})
 }

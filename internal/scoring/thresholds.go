@@ -123,6 +123,49 @@ func SeedDefaults() []struct {
 	}
 }
 
+// thresholdSpec, eşik anahtarının kabul edilebilir [min,max] aralığıdır.
+// API üzerinden gelen güncellemeler bu spec'e göre doğrulanır.
+type thresholdSpec struct {
+	Min float64
+	Max float64
+}
+
+var thresholdSpecs = map[string]thresholdSpec{
+	"rssi_critical_dbm":                      {-120, 0},
+	"rssi_warning_dbm":                       {-120, 0},
+	"snr_critical_db":                        {0, 60},
+	"snr_warning_db":                         {0, 60},
+	"ccq_critical_percent":                   {0, 100},
+	"ccq_warning_percent":                    {0, 100},
+	"packet_loss_critical_percent":           {0, 100},
+	"packet_loss_warning_percent":            {0, 100},
+	"latency_critical_ms":                    {0, 10000},
+	"latency_warning_ms":                     {0, 10000},
+	"jitter_critical_ms":                     {0, 10000},
+	"jitter_warning_ms":                      {0, 10000},
+	"stale_data_minutes":                     {1, 10080},
+	"ap_degradation_customer_ratio_warning":  {0, 1},
+	"ap_degradation_customer_ratio_critical": {0, 1},
+	"severity_healthy_at":                    {0, 100},
+	"severity_warning_at":                    {0, 100},
+}
+
+// IsKnownThresholdKey, bilinen bir eşik anahtarı mıdır?
+func IsKnownThresholdKey(k string) bool {
+	_, ok := thresholdSpecs[k]
+	return ok
+}
+
+// IsValidThresholdValue, anahtar için değer aralık içinde mi?
+// Bilinmeyen anahtar için false döner (önce IsKnownThresholdKey kontrol edin).
+func IsValidThresholdValue(k string, v float64) bool {
+	spec, ok := thresholdSpecs[k]
+	if !ok {
+		return false
+	}
+	return v >= spec.Min && v <= spec.Max
+}
+
 // ApplyOverrides, key/value mapinden Thresholds alanlarını günceller.
 // Bilinmeyen anahtarlar sessizce yok sayılır.
 func (t Thresholds) ApplyOverrides(overrides map[string]float64) Thresholds {

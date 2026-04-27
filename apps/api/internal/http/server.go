@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wisp-ops-center/wisp-ops-center/internal/adapters/mikrotik"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/audit"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/config"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/credentials"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/database"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/devicectl"
-	"github.com/wisp-ops-center/wisp-ops-center/internal/adapters/mikrotik"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/inventory"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scheduler"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scoring"
