@@ -58,6 +58,9 @@ func main() {
 			// Faz 6: customer_signal_check için gerçek handler
 			registry.Register(scheduler.JobCustomerSignalCheck,
 				workerinternal.CustomerSignalCheckHandler(db.P, log))
+			// Faz 7: daily_executive_summary handler'ı.
+			registry.Register(scheduler.JobDailyExecutiveSummary,
+				workerinternal.DailyExecutiveSummaryHandler(db.P, log))
 			go workerinternal.RunSchedulerLoop(ctx, db.P, log, registry, workerinternal.SchedulerLoopConfig{})
 		}
 	} else {

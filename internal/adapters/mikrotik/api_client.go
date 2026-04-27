@@ -12,6 +12,11 @@ import (
 	"github.com/go-routeros/routeros/v3"
 )
 
+// ErrInvalidCA, ca_certificate_pem geçerli bir PEM bloku değilse veya
+// hiçbir sertifika çözümlenemiyorsa döner. Fail-closed davranır:
+// VerifyTLS=true iken bu hata alınırsa bağlantı asla kurulmaz.
+var ErrInvalidCA = errors.New("mikrotik: invalid ca_certificate_pem")
+
 // APIClient wraps a RouterOS API-SSL connection. It never executes commands
 // outside the read-only allowlist; the public methods enforce this.
 type APIClient struct {
@@ -41,12 +46,9 @@ func (c *APIClient) Dial(ctx context.Context) error {
 	}
 	addr := net.JoinHostPort(c.cfg.Host, fmt.Sprintf("%d", port))
 
-	tlsCfg := &tls.Config{
-		// Phase 3 default: do not verify TLS by default because most
-		// MikroTik installs use self-signed certs. Operators that have
-		// pinned a CA can set VerifyTLS=true on the credential profile.
-		InsecureSkipVerify: !c.cfg.VerifyTLS,
-		MinVersion:         tls.VersionTLS12,
+	tlsCfg, err := BuildAPITLSConfig(c.cfg)
+	if err != nil {
+		return err
 	}
 
 	dialer := &net.Dialer{Timeout: c.timeout}

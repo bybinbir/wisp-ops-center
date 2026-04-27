@@ -47,6 +47,7 @@ type View struct {
 	SNMPv3PrivSet         bool   `json:"snmpv3_priv_set"`
 	VerifyTLS             bool   `json:"verify_tls"`
 	ServerNameOverride    string `json:"server_name_override,omitempty"`
+	CACertificateSet      bool   `json:"ca_certificate_set"`
 	SSHHostKeyPolicy      string `json:"ssh_host_key_policy,omitempty"`
 	SSHHostKeyFingerprint string `json:"ssh_host_key_fingerprint,omitempty"`
 }
@@ -57,18 +58,20 @@ COALESCE(snmpv3_username,''), COALESCE(snmpv3_security_level,''),
 COALESCE(snmpv3_auth_protocol,''), snmpv3_auth_secret_ciphertext,
 COALESCE(snmpv3_priv_protocol,''), snmpv3_priv_secret_ciphertext,
 COALESCE(verify_tls,FALSE), COALESCE(server_name_override,''),
-COALESCE(ssh_host_key_policy,'insecure_ignore'), COALESCE(ssh_host_key_fingerprint,'')`
+COALESCE(ssh_host_key_policy,'insecure_ignore'), COALESCE(ssh_host_key_fingerprint,''),
+COALESCE(ca_certificate_pem,'')`
 
 func scanView(row pgx.Row) (*View, error) {
 	var v View
 	var port *int
 	var secret []byte
 	var snmpAuthSecret, snmpPrivSecret []byte
+	var caPEM string
 	if err := row.Scan(
 		&v.ID, &v.Name, &v.AuthType, &v.Username, &port, &secret, &v.Notes, &v.CreatedAt, &v.UpdatedAt,
 		&v.SNMPv3Username, &v.SNMPv3SecurityLevel, &v.SNMPv3AuthProtocol, &snmpAuthSecret,
 		&v.SNMPv3PrivProtocol, &snmpPrivSecret, &v.VerifyTLS, &v.ServerNameOverride,
-		&v.SSHHostKeyPolicy, &v.SSHHostKeyFingerprint,
+		&v.SSHHostKeyPolicy, &v.SSHHostKeyFingerprint, &caPEM,
 	); err != nil {
 		return nil, err
 	}
@@ -76,6 +79,7 @@ func scanView(row pgx.Row) (*View, error) {
 	v.SecretSet = len(secret) > 0
 	v.SNMPv3AuthSet = len(snmpAuthSecret) > 0
 	v.SNMPv3PrivSet = len(snmpPrivSecret) > 0
+	v.CACertificateSet = caPEM != ""
 	return &v, nil
 }
 
@@ -125,6 +129,7 @@ type CreateInput struct {
 	SNMPv3PrivSecret      string
 	VerifyTLS             bool
 	ServerNameOverride    string
+	CACertificatePEM      string
 	SSHHostKeyPolicy      string
 	SSHHostKeyFingerprint string
 }
@@ -170,8 +175,8 @@ INSERT INTO credential_profiles(
   snmpv3_username, snmpv3_security_level, snmpv3_auth_protocol,
   snmpv3_auth_secret_ciphertext, snmpv3_priv_protocol, snmpv3_priv_secret_ciphertext,
   snmpv3_secret_key_id, verify_tls, server_name_override,
-  ssh_host_key_policy, ssh_host_key_fingerprint
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+  ssh_host_key_policy, ssh_host_key_fingerprint, ca_certificate_pem
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 RETURNING `+viewCols,
 		in.Name, string(in.AuthType), nilIfEmpty(in.Username), in.Port, ct,
 		stringPtr(r.Vault.KeyID()), nilIfEmpty(in.Notes),
@@ -180,6 +185,7 @@ RETURNING `+viewCols,
 		nilIfEmpty(in.SNMPv3PrivProtocol), privCT,
 		stringPtr(r.Vault.KeyID()), in.VerifyTLS, nilIfEmpty(in.ServerNameOverride),
 		in.SSHHostKeyPolicy, nilIfEmpty(in.SSHHostKeyFingerprint),
+		nilIfEmpty(in.CACertificatePEM),
 	)
 	return scanView(row)
 }
@@ -201,6 +207,7 @@ type UpdateInput struct {
 	SNMPv3PrivSecret      *string
 	VerifyTLS             *bool
 	ServerNameOverride    *string
+	CACertificatePEM      *string
 	SSHHostKeyPolicy      *string
 	SSHHostKeyFingerprint *string
 }
@@ -282,6 +289,13 @@ func (r *Repository) Update(ctx context.Context, id string, in UpdateInput) (*Vi
 	}
 	if in.ServerNameOverride != nil {
 		add("server_name_override", *in.ServerNameOverride)
+	}
+	if in.CACertificatePEM != nil {
+		if *in.CACertificatePEM == "" {
+			add("ca_certificate_pem", nil)
+		} else {
+			add("ca_certificate_pem", *in.CACertificatePEM)
+		}
 	}
 	if in.SSHHostKeyPolicy != nil {
 		add("ssh_host_key_policy", *in.SSHHostKeyPolicy)

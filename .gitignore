@@ -8,6 +8,7 @@ coverage.out
 node_modules/
 .next/
 out/
+apps/web/tsconfig.tsbuildinfo
 
 # Editör / OS
 .DS_Store

@@ -6,9 +6,20 @@ WISP operasyon karar platformu. Genel bir cihaz yönetim paneli **değildir**.
 
 ## Faz Durumu
 
-**Aktif faz:** **Faz 6 — Customer Signal Scoring + Problem Customer Detection.** Faz 1-5 tamamlandı.
+**Aktif faz:** **Faz 7 — Work Orders + Reports + Executive Summaries.** Faz 1-6 tamamlandı.
 
-Tam yol haritası: `TASK_BOARD.md`.
+Faz 7 ne ekledi:
+
+- Gerçek `work_orders` + `work_order_events` tabloları, status state machine, atama / ETA / çözüm akışı.
+- `POST /work-order-candidates/{id}/promote` ile aday → iş emri promosyonu (idempotent + audit).
+- Aday duplicate guard'ı genişletildi: `recently_dismissed`, `recently_cancelled`, `already_promoted` (cooldown gün eşiği `work_order_duplicate_cooldown_days`, varsayılan 7).
+- Yönetici özeti + problem-customers / ap-health / tower-risk / work-orders raporları (JSON, CSV, yazdırılabilir HTML/PDF).
+- `report_snapshots` tablosu + scheduler `daily_executive_summary` job'ı.
+- Audit JSON / NDJSON export (`/audit/export`).
+- RouterOS API-SSL TLS hardening: `ca_certificate_pem` ve `server_name_override` runtime'da tüketiliyor; geçersiz CA → fail-closed.
+- Yeni UI: `/is-emirleri`, `/is-emirleri/[id]`, `/raporlar`, `/raporlar/yonetici-ozeti` ve dashboard Phase 7 kartları.
+
+Tam yol haritası: `TASK_BOARD.md`. Detay: `docs/PHASE_007_WORK_ORDERS_REPORTS.md`.
 
 ## Stack
 
@@ -40,6 +51,7 @@ wisp-ops-center/
                  000004_mimosa_readonly_and_credentials.sql
                  000005_scheduled_checks_ap_client_tests.sql
                  000006_customer_signal_scoring.sql
+                 000007_work_orders_reports.sql
   docs/          ARCHITECTURE / DATA_MODEL / DEVICE_CAPABILITY_MODEL
                  SCORING_MODEL / SCHEDULER_MODEL / SAFETY_MODEL
                  AP_CLIENT_TEST_ENGINE / GITHUB_WORKFLOW
@@ -48,6 +60,7 @@ wisp-ops-center/
                  MAINTENANCE_WINDOWS / SSH_HOST_KEY_POLICY
                  CUSTOMER_SIGNAL_SCORING / PROBLEM_CUSTOMER_DETECTION
                  WORK_ORDER_CANDIDATES / VAULT_ROTATION
+                 PHASE_007_WORK_ORDERS_REPORTS / RUNBOOK_PHASE_007
   infra/         nginx, systemd, prometheus
   scripts/       dev_run_*, db_migrate
 ```

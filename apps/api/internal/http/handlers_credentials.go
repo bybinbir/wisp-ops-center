@@ -37,6 +37,7 @@ func (s *Server) handleCredCollection(w http.ResponseWriter, r *http.Request) {
 			SNMPv3PrivSecret      string `json:"snmpv3_priv_secret,omitempty"`
 			VerifyTLS             bool   `json:"verify_tls,omitempty"`
 			ServerNameOverride    string `json:"server_name_override,omitempty"`
+			CACertificatePEM      string `json:"ca_certificate_pem,omitempty"`
 			SSHHostKeyPolicy      string `json:"ssh_host_key_policy,omitempty"`
 			SSHHostKeyFingerprint string `json:"ssh_host_key_fingerprint,omitempty"`
 		}
@@ -51,7 +52,9 @@ func (s *Server) handleCredCollection(w http.ResponseWriter, r *http.Request) {
 			SNMPv3AuthProtocol: in.SNMPv3AuthProtocol, SNMPv3AuthSecret: in.SNMPv3AuthSecret,
 			SNMPv3PrivProtocol: in.SNMPv3PrivProtocol, SNMPv3PrivSecret: in.SNMPv3PrivSecret,
 			VerifyTLS: in.VerifyTLS, ServerNameOverride: in.ServerNameOverride,
-			SSHHostKeyPolicy: in.SSHHostKeyPolicy, SSHHostKeyFingerprint: in.SSHHostKeyFingerprint,
+			CACertificatePEM:      in.CACertificatePEM,
+			SSHHostKeyPolicy:      in.SSHHostKeyPolicy,
+			SSHHostKeyFingerprint: in.SSHHostKeyFingerprint,
 		})
 		var ve *credentials.ErrValidation
 		if errors.As(err, &ve) {
@@ -119,6 +122,7 @@ func (s *Server) handleCredItem(w http.ResponseWriter, r *http.Request) {
 			SNMPv3PrivSecret      *string `json:"snmpv3_priv_secret,omitempty"`
 			VerifyTLS             *bool   `json:"verify_tls,omitempty"`
 			ServerNameOverride    *string `json:"server_name_override,omitempty"`
+			CACertificatePEM      *string `json:"ca_certificate_pem,omitempty"`
 			SSHHostKeyPolicy      *string `json:"ssh_host_key_policy,omitempty"`
 			SSHHostKeyFingerprint *string `json:"ssh_host_key_fingerprint,omitempty"`
 		}
@@ -138,7 +142,9 @@ func (s *Server) handleCredItem(w http.ResponseWriter, r *http.Request) {
 			SNMPv3AuthProtocol: in.SNMPv3AuthProtocol, SNMPv3AuthSecret: in.SNMPv3AuthSecret,
 			SNMPv3PrivProtocol: in.SNMPv3PrivProtocol, SNMPv3PrivSecret: in.SNMPv3PrivSecret,
 			VerifyTLS: in.VerifyTLS, ServerNameOverride: in.ServerNameOverride,
-			SSHHostKeyPolicy: in.SSHHostKeyPolicy, SSHHostKeyFingerprint: in.SSHHostKeyFingerprint,
+			CACertificatePEM:      in.CACertificatePEM,
+			SSHHostKeyPolicy:      in.SSHHostKeyPolicy,
+			SSHHostKeyFingerprint: in.SSHHostKeyFingerprint,
 		})
 		var ve *credentials.ErrValidation
 		if errors.As(err, &ve) {

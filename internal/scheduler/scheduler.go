@@ -16,6 +16,8 @@ const (
 	JobMikroTikReadOnlyPoll         JobType = "mikrotik_readonly_poll"
 	JobMimosaReadOnlyPoll           JobType = "mimosa_readonly_poll"
 	JobFrequencyRecommendationAnaly JobType = "frequency_recommendation_analysis"
+	// Faz 7
+	JobDailyExecutiveSummary JobType = "daily_executive_summary"
 )
 
 // AllJobTypes, kayıt için tek noktadan iş listesi.
@@ -28,6 +30,7 @@ func AllJobTypes() []JobType {
 		JobMikroTikReadOnlyPoll,
 		JobMimosaReadOnlyPoll,
 		JobFrequencyRecommendationAnaly,
+		JobDailyExecutiveSummary,
 	}
 }
 

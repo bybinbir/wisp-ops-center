@@ -21,6 +21,7 @@ var JobCatalog = []JobCatalogEntry{
 	{JobCustomerSignalCheck, RiskLow, true, "Customer signal check (Phase 6 — telemetri+test → skor)"},
 	{JobDailyNetworkCheck, RiskLow, true, "Daily network sweep"},
 	{JobWeeklyNetworkReport, RiskLow, true, "Weekly network report"},
+	{JobDailyExecutiveSummary, RiskLow, true, "Daily executive summary snapshot (Phase 7)"},
 	// Frequency recommendation analysis stays planned-only in Phase 5.
 	{JobFrequencyRecommendationAnaly, RiskMedium, false, "Frekans öneri motoru (Phase 8)"},
 

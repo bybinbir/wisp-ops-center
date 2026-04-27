@@ -30,6 +30,10 @@ func TestJobCatalogControlsExecution(t *testing.T) {
 	if err := EnsureJobAllowed("nope"); !errors.Is(err, ErrJobTypeUnknown) {
 		t.Fatalf("unknown should fail: %v", err)
 	}
+	// Phase 7 — daily_executive_summary kayıtlı ve aktif olmalı.
+	if err := EnsureJobAllowed(JobDailyExecutiveSummary); err != nil {
+		t.Fatalf("daily_executive_summary must be enabled: %v", err)
+	}
 }
 
 func TestControlledApplyAlwaysRejected(t *testing.T) {

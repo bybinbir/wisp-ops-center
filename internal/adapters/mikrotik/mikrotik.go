@@ -35,6 +35,15 @@ type Config struct {
 	//   "insecure_ignore" | "trust_on_first_use" | "pinned"
 	SSHHostKeyPolicy      string
 	SSHHostKeyFingerprint string
+
+	// Faz 7 — RouterOS API-SSL TLS hardening.
+	//   CACertificatePEM   : PEM kodlu özel CA (opsiyonel). VerifyTLS=true
+	//                        ise RootCAs olarak kullanılır.
+	//   ServerNameOverride : SNI/peer doğrulamada kullanılacak hostname.
+	//                        Cihazın IP adresi sertifika SAN'da yer almıyorsa
+	//                        operatör buraya sertifika CN/SAN değerini koyar.
+	CACertificatePEM   string
+	ServerNameOverride string
 }
 
 // Vendor returns the constant adapter identifier.

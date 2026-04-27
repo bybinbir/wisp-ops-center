@@ -14,6 +14,9 @@ func TestIsKnownThresholdKey(t *testing.T) {
 		"ap_degradation_customer_ratio_warning",
 		"ap_degradation_customer_ratio_critical",
 		"severity_healthy_at", "severity_warning_at",
+		// Phase 7
+		"work_order_duplicate_cooldown_days",
+		"work_order_default_eta_hours",
 	}
 	for _, k := range known {
 		if !IsKnownThresholdKey(k) {
@@ -42,6 +45,11 @@ func TestIsValidThresholdValue(t *testing.T) {
 		{"ap_degradation_customer_ratio_critical", 1.5, false},
 		{"stale_data_minutes", 60, true},
 		{"stale_data_minutes", 0, false},
+		{"work_order_duplicate_cooldown_days", 7, true},
+		{"work_order_duplicate_cooldown_days", -1, false},
+		{"work_order_duplicate_cooldown_days", 1000, false},
+		{"work_order_default_eta_hours", 24, true},
+		{"work_order_default_eta_hours", -5, false},
 		{"unknown_key", 1, false}, // unknown -> false
 	}
 	for _, tc := range tests {
