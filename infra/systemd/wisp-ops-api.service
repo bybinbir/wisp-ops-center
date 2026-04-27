@@ -1,0 +1,23 @@
+[Unit]
+Description=wisp-ops-center API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=wispops
+Group=wispops
+WorkingDirectory=/opt/wisp-ops-center
+EnvironmentFile=/etc/wisp-ops/api.env
+ExecStart=/opt/wisp-ops-center/bin/wisp-ops-api
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/wisp-ops
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

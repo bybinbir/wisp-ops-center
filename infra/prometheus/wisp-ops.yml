@@ -1,0 +1,21 @@
+# Prometheus scrape configuration örneği.
+# /metrics ucu Faz 10'da API tarafına eklenecek.
+
+scrape_configs:
+  - job_name: wisp-ops-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "127.0.0.1:8080"
+        labels:
+          service: api
+          env: production
+
+  - job_name: wisp-ops-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - "127.0.0.1:8081"
+        labels:
+          service: worker
+          env: production

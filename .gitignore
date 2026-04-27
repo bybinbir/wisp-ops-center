@@ -1,0 +1,32 @@
+# Go
+/bin/
+/build/
+*.out
+coverage.out
+
+# Node
+node_modules/
+.next/
+out/
+
+# Editör / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# linter/editor backup files (cannot be deleted from Windows mount)
+*.go.[0-9]*
+*.go.[0-9]*[0-9]*
+
+
+# stray go build outputs (artifact when running `go build` w/o -o)
+/api
+/worker
+*-go-tmp-*
+
