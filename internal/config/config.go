@@ -22,7 +22,29 @@ type Config struct {
 	Vault    VaultConfig
 	Log      LogConfig
 
+	Dude DudeConfig
+
 	MaintenanceMode bool
+}
+
+// DudeConfig holds the connection parameters for the MikroTik Dude
+// SSH discovery target used by Phase 8. The password is read from
+// the environment at runtime and NEVER persisted, logged, or echoed
+// back through API responses.
+type DudeConfig struct {
+	Host               string
+	Port               int
+	Username           string
+	Password           string
+	Timeout            time.Duration
+	HostKeyPolicy      string
+	HostKeyFingerprint string
+}
+
+// Configured reports whether enough fields are present for the
+// adapter to attempt a connection. Password is required.
+func (d DudeConfig) Configured() bool {
+	return d.Host != "" && d.Username != "" && d.Password != ""
 }
 
 // DatabaseConfig holds PostgreSQL connection parameters.
@@ -90,6 +112,16 @@ func Load() (*Config, error) {
 		Log: LogConfig{
 			Level:  strings.ToLower(firstNonEmpty(os.Getenv("LOG_LEVEL"), "info")),
 			Format: strings.ToLower(firstNonEmpty(os.Getenv("LOG_FORMAT"), "text")),
+		},
+
+		Dude: DudeConfig{
+			Host:               os.Getenv("MIKROTIK_DUDE_HOST"),
+			Port:               envInt("MIKROTIK_DUDE_PORT", 22),
+			Username:           os.Getenv("MIKROTIK_DUDE_USERNAME"),
+			Password:           os.Getenv("MIKROTIK_DUDE_PASSWORD"),
+			Timeout:            time.Duration(envInt("MIKROTIK_DUDE_TIMEOUT_MS", 10000)) * time.Millisecond,
+			HostKeyPolicy:      firstNonEmpty(os.Getenv("MIKROTIK_DUDE_HOST_KEY_POLICY"), "trust_on_first_use"),
+			HostKeyFingerprint: os.Getenv("MIKROTIK_DUDE_HOST_KEY_FINGERPRINT"),
 		},
 
 		MaintenanceMode: envBool("WISP_MAINTENANCE_MODE", false),

@@ -16,10 +16,14 @@ apps/web/tsconfig.tsbuildinfo
 .vscode/
 *.swp
 
-# Env
+# Env / Secrets
 .env
 .env.local
 .env.*.local
+.secrets
+.secrets/
+*.pem
+*.key
 
 # linter/editor backup files (cannot be deleted from Windows mount)
 *.go.[0-9]*
