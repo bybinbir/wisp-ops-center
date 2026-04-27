@@ -6,9 +6,9 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6**
-- ▣ Active: **Phase 7 — Work Orders + Reports + Executive Summaries** (kod + UI + docs hazır; gerçek lab Postgres ile end-to-end doğrulama bekliyor)
-- ☐ Remaining: **Phase 8, 9, 10**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7**
+- ▣ Active: **Phase 8 — MikroTik Dude SSH Discovery + Network Inventory** (kod + UI + docs hazır; gerçek MikroTik bağlantı testi şifre repoda olmadığı için manuel doğrulama bekliyor)
+- ☐ Remaining: **Phase 9, 10**
 
 ---
 
@@ -242,17 +242,70 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 - ☐ Server-side gerçek PDF rendering (Faz 8/9)
 - ☐ Otomatik audit retention temizlik scheduler job (Faz 8)
 
-## 6. Phase 8 Planned — Frequency Recommendation Engine
+## 6. Phase 8 Active — MikroTik Dude SSH Discovery + Network Inventory
 
-- ☐ Read-only sürveyans verilerinden frekans riski analizi
-- ☐ Kanal/genişlik **önerisi** üret — apply YOK
-- ☐ AP/PtP konfigine yansıtma yapılmaz; yalnız UI'de gösterilir
-- ☐ Operatör onayı gerekmeden hiçbir öneri otomatik çalışmaz
-- ☐ Server-side gerçek PDF rendering (Phase 7'den taşınan açık borç)
-- ☐ Otomatik audit retention scheduler job (Phase 7'den taşınan açık borç)
+Detay: `docs/PHASE_008_MIKROTIK_DUDE_DISCOVERY.md`. Branch: `phase/008-mikrotik-dude-discovery`. Migration: `000008_mikrotik_dude_discovery.sql`.
 
-## 7. Phase 9 Planned — Controlled Apply + Backup + Rollback
+### Env / Secrets
+- ☑ `.env.example`: `MIKROTIK_DUDE_HOST/PORT/USERNAME/PASSWORD/TIMEOUT_MS/HOST_KEY_POLICY/HOST_KEY_FINGERPRINT`
+- ☑ Şifre runtime'dan okunur; repoda boş; `.gitignore` `.secrets`, `*.pem`, `*.key` korur
+- ☑ `internal/config.DudeConfig` + `Configured()` yardımcısı
 
+### SSH Discovery Adapter (`internal/dude`)
+- ☑ `client.go`: TOFU/Pinned/InsecureIgnore policy, timeout, correlation_id, sanitized error
+- ☑ `allowlist.go`: 18 read-only RouterOS komutu — destructive komut yok (test ile garanti)
+- ☑ `parser.go`: RouterOS print detail/simple parser (k=v + quoted + flag/index strip)
+- ☑ `classify.go`: Heuristic skoru (Dude type, name prefix, wireless-mode, model hint, interface-type) → 7 kategori + confidence 0..100 + Evidence trail
+- ☑ `discovery.go`: Run orchestrator — `/dude/device/print/detail` primary, `/ip/neighbor/print/detail` fallback, `/system/identity` self; MAC>IP>Name dedupe; partial-fail tolerant
+- ☑ `sanitize.go`: SanitizeAttrs (raw_metadata redaction) + SanitizeMessage (log/UI)
+
+### Schema (`migrations/000008_mikrotik_dude_discovery.sql`)
+- ☑ `network_devices`, `discovery_runs`, `network_links`, `device_category_evidence`, `network_automation_jobs`
+- ☑ Partial unique indexler — MAC > (host,name) > name ile duplicate koruma
+- ☑ `network_automation_jobs.job_type` CHECK = 'discovery' (destructive aksiyonlar bu fazda kapsam dışı)
+
+### Repository (`internal/networkinv`)
+- ☑ `CreateRun` / `FinalizeRun` (running → succeeded|partial|failed)
+- ☑ `UpsertDevices` tek transaction; per-device evidence refresh
+- ☑ `ListDevices(filter)` + `GetDevice` + `ListRuns` + `LatestRun`
+
+### API (`apps/api/internal/http/handlers_network.go`)
+- ☑ `POST /api/v1/network/discovery/mikrotik-dude/test-connection`
+- ☑ `POST /api/v1/network/discovery/mikrotik-dude/run` (async, 202; 409 zaten çalışıyorsa)
+- ☑ `GET /api/v1/network/discovery/runs`
+- ☑ `GET /api/v1/network/devices?category=&status=&unknown=&low_confidence=` + summary bloğu
+- ☑ `GET /api/v1/network/devices/{id}`
+- ☑ Bearer auth middleware'inden geçer; audit `network.dude.test_connection / run.start / run.finish`
+
+### Action Framework (`internal/networkactions`)
+- ☑ Kind enum, IsDestructive, Request/Result, MaintenanceWindow tipi
+- ☑ Registry + per-device lock + RateLimiter (token bucket)
+- ☑ Stub action her Kind için kayıtlı; `Execute` → `ErrActionNotImplemented`
+- ☐ Gerçek frequency_check / ap_client_test / link_signal_test / bridge_health_check (Faz 9)
+
+### Web UI
+- ☑ `/ag-envanteri` sayfası — Sidebar'a eklendi, "Faz 8" altyazılı
+- ☑ 8 stat card (toplam, AP, link, bridge, CPE, router, switch, bilinmeyen) + son discovery zamanı/durumu/hatası
+- ☑ "Bağlantıyı Test Et" + "Discovery Çalıştır" butonları (async + 2sn poll)
+- ☑ Tablo (Ad/IP/Kategori-badge/Confidence/Status/LastSeen/Source) + filtreler (kategori, status, low_confidence, unknown_only)
+- ☑ Empty/loading/error state'leri
+
+### Tests / Quality Gates
+- ☑ Unit: parser, classify, sanitize, allowlist, discovery, networkactions, config
+- ☑ `gofmt -l` clean; `go vet ./...` clean; `go build ./...` clean
+- ☑ `go test ./internal/dude/... ./internal/networkactions/... ./internal/config/...` yeşil
+- ☑ `next build` yeşil (`/ag-envanteri` 5.3 kB statik)
+- ☐ Live MikroTik bağlantı testi — şifre repoda olmadığı için manuel (lokal `.env` doldur + `POST /test-connection`)
+
+### Açık Borçlar (Faz 7'den taşınan)
+- ☐ Server-side gerçek PDF rendering (Faz 9)
+- ☐ Otomatik audit retention temizlik scheduler job (Faz 9)
+
+## 7. Phase 9 Planned — AP/Link Tests + Frequency Correction (Controlled Apply)
+
+- ☐ Frequency check + correction — Faz 8 action framework etkinleştirilir, dry-run zorunlu, confirmation policy, audit + rollback metadata
+- ☐ AP-client test motoru — Faz 8 envanterindeki `Category=AP` cihazlarına otomatik koşturma
+- ☐ Link signal test + bridge health check
 - ☐ Cihaz konfig backup motoru (read-only, RouterOS export)
 - ☐ Pre-apply doğrulama: maintenance window içi mi, link kapanmaz mı?
 - ☐ Onay zinciri (multi-actor)

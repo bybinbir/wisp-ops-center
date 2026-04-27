@@ -6,7 +6,19 @@ WISP operasyon karar platformu. Genel bir cihaz yönetim paneli **değildir**.
 
 ## Faz Durumu
 
-**Aktif faz:** **Faz 7 — Work Orders + Reports + Executive Summaries.** Faz 1-6 tamamlandı.
+**Aktif faz:** **Faz 8 — MikroTik Dude SSH Discovery + Network Inventory.** Faz 1-7 tamamlandı.
+
+Faz 8 ne ekledi:
+
+- MikroTik Dude / RouterOS SSH read-only discovery adaptörü (`internal/dude`).
+- Heuristic tabanlı sınıflandırıcı: AP, BackhaulLink, Bridge, CPE, Router, Switch, Unknown — confidence 0-100 + per-device evidence.
+- 4 yeni tablo (`network_devices`, `network_links`, `discovery_runs`, `device_category_evidence`) + scheduling iskeleti (`network_automation_jobs`).
+- 5 yeni API ucu: test-connection, async run, runs listesi, devices list/get + filtreler.
+- `/ag-envanteri` dashboard sayfası — özet kartları, filtreler, "Bağlantıyı Test Et" + "Discovery Çalıştır".
+- Action framework iskeleti (`internal/networkactions`) — sonraki fazda etkinleştirilecek frequency_check / ap_client_test / link_signal_test / bridge_health_check için contract; **hiçbir destructive işlem yok**.
+- Şifre `.env`'den okunur; repoda, logda, raw_metadata'da asla görünmez. SHA256 fingerprint TOFU policy varsayılan.
+
+Detay: `docs/PHASE_008_MIKROTIK_DUDE_DISCOVERY.md`.
 
 Faz 7 ne ekledi:
 
@@ -45,6 +57,8 @@ wisp-ops-center/
     adapters/{mikrotik,mimosa,snmp,ssh}
     devicectl/  telemetry/
     scheduler/  scoring/  reports/  recommendations/
+    workorders/
+    dude/  networkinv/  networkactions/   # Faz 8
   migrations/    000001_initial_schema.sql
                  000002_phase2_inventory_hardening.sql
                  000003_mikrotik_readonly.sql
@@ -52,6 +66,7 @@ wisp-ops-center/
                  000005_scheduled_checks_ap_client_tests.sql
                  000006_customer_signal_scoring.sql
                  000007_work_orders_reports.sql
+                 000008_mikrotik_dude_discovery.sql
   docs/          ARCHITECTURE / DATA_MODEL / DEVICE_CAPABILITY_MODEL
                  SCORING_MODEL / SCHEDULER_MODEL / SAFETY_MODEL
                  AP_CLIENT_TEST_ENGINE / GITHUB_WORKFLOW
