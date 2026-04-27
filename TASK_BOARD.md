@@ -6,9 +6,9 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5**
-- ▣ Active: **Phase 6 — Customer Signal Scoring + Problem Customer Detection** (kod + UI + docs hazır; gerçek lab Postgres ile end-to-end doğrulama bekliyor)
-- ☐ Remaining: **Phase 7, 8, 9, 10**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6**
+- ▣ Active: **Phase 7 — Work Orders + Reports + Executive Summaries** (kod + UI + docs hazır; gerçek lab Postgres ile end-to-end doğrulama bekliyor)
+- ☐ Remaining: **Phase 8, 9, 10**
 
 ---
 
@@ -67,7 +67,7 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ---
 
-## 4. Phase 6 Active Tasks
+## 4. Phase 6 Completed Tasks
 
 ### Context Restore
 - ☑ Repo, docs, migrations, internal/, apps/api, apps/worker, apps/web okundu
@@ -148,15 +148,99 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ---
 
-## 5. Phase 7 Planned — Reports + Work Orders + Executive Summaries
+## 5. Phase 7 Active — Work Orders + Reports + Executive Summaries
 
-- ☐ `reports` tablosu + günlük/haftalık özet hesaplayıcı
-- ☐ Operatör onayıyla aday → gerçek iş emri promosyonu (`promoted_work_order_id`)
-- ☐ Saha ekibi atama, ETA, status workflow
-- ☐ Yönetici özeti UI (kule × hafta heat-map, kritik müşteri trendi)
-- ☐ PDF/CSV export endpoint'leri
-- ☐ ca_certificate_pem + server_name_override runtime tüketimi
-- ☐ Audit retention politikası
+### Migration & Schema
+- ☑ `migrations/000007_work_orders_reports.sql`
+- ☑ `work_orders` (status state machine, priority, ETA, atama, çözüm)
+- ☑ `work_order_events` (append-only timeline)
+- ☑ `report_snapshots` (executive_summary jsonb payload)
+- ☑ `work_order_candidates.status` constraint genişletildi (`cancelled` eklendi)
+- ☑ Cooldown index `(customer_id, diagnosis, status, updated_at)`
+- ☑ `scoring_thresholds`: `work_order_duplicate_cooldown_days=7`, `work_order_default_eta_hours=24`
+
+### Work Order Repository (`internal/workorders/`)
+- ☑ State machine: open ↔ assigned ↔ in_progress → resolved | cancelled
+- ☑ `PromoteCandidate` (idempotent, lock-based)
+- ☑ `Patch` her değişiklik için event yazar (status_changed, priority_changed, eta_updated, assigned, unassigned)
+- ☑ `Resolve`, `Cancel`, `Assign`, `AppendEvent`
+- ☑ `List` filtre: status/priority/severity/tower/AP/customer/assigned_to/date_range
+- ☑ `Counts` dashboard sayaçları
+
+### API endpoints
+- ☑ `GET/PATCH /api/v1/work-orders/{id}`
+- ☑ `GET /api/v1/work-orders` (filtre + pagination)
+- ☑ `POST /api/v1/work-orders/{id}/events`
+- ☑ `POST /api/v1/work-orders/{id}/assign` (auto_start desteği)
+- ☑ `POST /api/v1/work-orders/{id}/resolve`
+- ☑ `POST /api/v1/work-orders/{id}/cancel`
+- ☑ `POST /api/v1/work-order-candidates/{id}/promote`
+- ☑ `GET /api/v1/reports` (snapshot listesi)
+- ☑ `GET /api/v1/reports/executive-summary[.pdf]`
+- ☑ `GET /api/v1/reports/problem-customers[.csv]`
+- ☑ `GET /api/v1/reports/ap-health[.csv]`
+- ☑ `GET /api/v1/reports/tower-risk[.csv]`
+- ☑ `GET /api/v1/reports/work-orders[.csv|.pdf]`
+- ☑ `GET /api/v1/audit/export[.json|.ndjson]`
+
+### Duplicate Guard Cooldown
+- ☑ `duplicate_open_candidate` — aynı open aday
+- ☑ `already_promoted` — promoted ve aktif iş emri var
+- ☑ `recently_dismissed` — cooldown içinde dismiss
+- ☑ `recently_cancelled` — cooldown içinde cancel
+- ☑ Threshold: `work_order_duplicate_cooldown_days` (default 7)
+
+### Reports
+- ☑ Executive summary: severity dağılımı, top10 risky AP/tower, top diagnoses, work order sayaçları, 7d/30d trend
+- ☑ CSV (UTF-8, Türkçe başlık, streaming, `Content-Disposition: attachment`)
+- ☑ HTML-printable PDF (server-side gerçek PDF Faz 8/9'a ertelendi — açık teknik borç)
+
+### Scheduler
+- ☑ `JobDailyExecutiveSummary` katalog kaydı (risk=low, enabled)
+- ☑ `DailyExecutiveSummaryHandler` worker'da kayıtlı
+- ☑ `report_snapshots` tablosuna yazım
+
+### TLS Hardening
+- ☑ `mikrotik.BuildAPITLSConfig` — CA pool + ServerName override
+- ☑ `verify_tls=true + invalid CA` fail-closed (`ErrInvalidCA`)
+- ☑ devicectl `verify_tls` typo düzeltildi (önceden `tls_verify` okuyordu)
+- ☑ `credentials.View.CACertificateSet` flag (ham PEM API'ye sızmaz)
+- ☑ Test: 6 senaryo (`internal/adapters/mikrotik/tls_test.go`)
+
+### Audit Export
+- ☑ `/api/v1/audit/export.json` ve `.ndjson`
+- ☑ Filtre: action, actor, date_from, date_to, limit (max 50000)
+- ☑ 90 gün retention politikası dokümante edildi
+- ☐ Otomatik retention scheduler job → Phase 8
+
+### Web UI (Türkçe)
+- ☑ `/is-emirleri` — filtreli liste, CSV/PDF butonları
+- ☑ `/is-emirleri/[id]` — detay kartları, aksiyon paneli, olay timeline
+- ☑ `/raporlar` — rapor merkezi + CSV/PDF linkleri
+- ☑ `/raporlar/yonetici-ozeti` — severity, top10 AP/tower, trend
+- ☑ Dashboard Phase 7 kartları (Açık İş Emri, Urgent/High, ETA Geçenler, Bugün Oluşturulan)
+- ☑ `/musteriler/[id]` aday satırına "İş Emrine Çevir" + "Dismiss"
+- ☑ Sidebar etiketi `Faz 7 · iş emirleri + raporlar`
+
+### Documentation
+- ☑ `docs/PHASE_007_WORK_ORDERS_REPORTS.md` — kapsamlı dokümantasyon
+- ☑ `docs/RUNBOOK_PHASE_007.md` — operatör runbook
+- ☑ `README.md` Phase 7 bölümü
+- ☑ TASK_BOARD.md güncel
+
+### Tests / Build
+- ☑ `internal/workorders/workorders_test.go` (state machine + priority)
+- ☑ `internal/scoring/thresholds_test.go` Phase 7 anahtarları
+- ☑ `internal/reports/csv_test.go` (Türkçe başlık + ETA overdue)
+- ☑ `internal/scheduler/engine_test.go` daily_executive_summary kataloğu
+- ☑ `internal/adapters/mikrotik/tls_test.go` (CA / ServerName / fail-closed)
+- ☑ `gofmt -l .`, `go vet ./...`, `go test ./...`, `go build ./...` — yeşil
+- ☑ `npm run build` — yeşil (16 sayfa)
+- ☐ Gerçek Postgres ile promote/cooldown end-to-end (sandbox dışı)
+
+### Açık Borçlar
+- ☐ Server-side gerçek PDF rendering (Faz 8/9)
+- ☐ Otomatik audit retention temizlik scheduler job (Faz 8)
 
 ## 6. Phase 8 Planned — Frequency Recommendation Engine
 
@@ -164,6 +248,8 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 - ☐ Kanal/genişlik **önerisi** üret — apply YOK
 - ☐ AP/PtP konfigine yansıtma yapılmaz; yalnız UI'de gösterilir
 - ☐ Operatör onayı gerekmeden hiçbir öneri otomatik çalışmaz
+- ☐ Server-side gerçek PDF rendering (Phase 7'den taşınan açık borç)
+- ☐ Otomatik audit retention scheduler job (Phase 7'den taşınan açık borç)
 
 ## 7. Phase 9 Planned — Controlled Apply + Backup + Rollback
 

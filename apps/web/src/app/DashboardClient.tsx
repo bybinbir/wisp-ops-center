@@ -1,52 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, ApiError, CustomerWithIssue } from "@/lib/api";
+import { api, ApiError, ExecutiveSummary } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
-
-type DashboardStats = {
-  critical: number;
-  warning: number;
-  stale: number;
-  apWide: number;
-  lastCalculatedAt: string | null;
-};
+import Link from "next/link";
 
 export function DashboardClient() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [es, setEs] = useState<ExecutiveSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [crit, warn, stale, apw] = await Promise.all([
-          api.get<{ data: CustomerWithIssue[] }>(
-            "/api/v1/customers-with-issues?severity=critical&limit=500"
-          ),
-          api.get<{ data: CustomerWithIssue[] }>(
-            "/api/v1/customers-with-issues?severity=warning&limit=500"
-          ),
-          api.get<{ data: CustomerWithIssue[] }>(
-            "/api/v1/customers-with-issues?stale=true&limit=500"
-          ),
-          api.get<{ data: CustomerWithIssue[] }>(
-            "/api/v1/customers-with-issues?diagnosis=ap_wide_interference&limit=500"
-          ),
-        ]);
-        const all = [...(crit.data ?? []), ...(warn.data ?? [])];
-        const last = all
-          .map((r) => new Date(r.calculated_at).getTime())
-          .reduce((a, b) => Math.max(a, b), 0);
-        setStats({
-          critical: (crit.data ?? []).length,
-          warning: (warn.data ?? []).length,
-          stale: (stale.data ?? []).length,
-          apWide: (apw.data ?? []).length,
-          lastCalculatedAt: last > 0 ? new Date(last).toISOString() : null,
-        });
+        const r = await api.get<{ data: ExecutiveSummary }>(
+          "/api/v1/reports/executive-summary"
+        );
+        setEs(r.data);
       } catch (e) {
         const msg =
           e instanceof ApiError && e.status === 503
-            ? "Veritabanı bağlı değil. Skor motoru pasif."
+            ? "Veritabanı bağlı değil. Skor motoru ve raporlar pasif."
             : e instanceof Error
               ? e.message
               : "Bilinmeyen hata";
@@ -62,53 +34,74 @@ export function DashboardClient() {
       <div className="cards">
         <StatCard
           title="Kritik Müşteri"
-          value={stats?.critical ?? "—"}
-          meta={
-            stats === null
-              ? "yükleniyor"
-              : "skor < uyarı eşiği · son skorlama satırı"
-          }
+          value={es?.critical_customers ?? "—"}
+          meta="severity = critical (son skor)"
         />
         <StatCard
           title="Uyarıdaki Müşteri"
-          value={stats?.warning ?? "—"}
-          meta={
-            stats === null ? "yükleniyor" : "uyarı eşiği ile sağlıklı arası"
-          }
+          value={es?.warning_customers ?? "—"}
+          meta="severity = warning"
         />
         <StatCard
           title="AP-Wide Sorun"
-          value={stats?.apWide ?? "—"}
-          meta="ap_wide_interference tanılı müşteri sayısı"
+          value={es?.ap_wide_interference_customers ?? "—"}
+          meta="ap_wide_interference tanılı"
         />
         <StatCard
           title="Bayat Veri"
-          value={stats?.stale ?? "—"}
-          meta="is_stale=true · veri tazelik eşiği aşıldı"
+          value={es?.stale_customers ?? "—"}
+          meta="is_stale=true"
         />
         <StatCard
-          title="Son Skorlama"
-          value={
-            stats?.lastCalculatedAt
-              ? new Date(stats.lastCalculatedAt).toLocaleString("tr-TR")
-              : "—"
-          }
-          meta="customer_signal_scores en yeni satır"
+          title="Açık İş Emri"
+          value={es?.open_work_orders ?? "—"}
+          meta="status ∈ open/assigned/in_progress"
         />
         <StatCard
-          title="Frekans / Parazit"
-          value="—"
-          meta="öneri motoru (Faz 8)"
+          title="Urgent / High"
+          value={es?.urgent_or_high_priority_work_orders ?? "—"}
+          meta="priority urgent veya high"
+        />
+        <StatCard
+          title="ETA Geçenler"
+          value={es?.overdue_eta_work_orders ?? "—"}
+          meta="eta_at < now ve aktif"
+        />
+        <StatCard
+          title="Bugün Oluşturulan"
+          value={es?.created_today_work_orders ?? "—"}
+          meta="bu güne ait iş emri"
         />
       </div>
 
       <section className="section">
-        <h3 className="section-title">Önceliklendirilmiş Olaylar</h3>
-        <div className="empty">
-          Sorunlu müşteri listesi <a href="/musteriler">/musteriler</a> sayfasında
-          gösterilir. Skor üretimi worker veya{" "}
-          <code>POST /api/v1/scoring/run</code> ile tetiklenir.
-        </div>
+        <h3 className="section-title">Hızlı Erişim</h3>
+        <ul style={{ lineHeight: 1.8 }}>
+          <li>
+            <Link href="/musteriler" style={{ color: "var(--accent)" }}>
+              Sorunlu Müşteriler
+            </Link>{" "}
+            — skor sonucu açık problem listesi
+          </li>
+          <li>
+            <Link href="/is-emirleri" style={{ color: "var(--accent)" }}>
+              İş Emirleri
+            </Link>{" "}
+            — saha ekibi atama, ETA, çözüm akışı
+          </li>
+          <li>
+            <Link href="/raporlar/yonetici-ozeti" style={{ color: "var(--accent)" }}>
+              Yönetici Özeti
+            </Link>{" "}
+            — risk haritası ve trend
+          </li>
+          <li>
+            <Link href="/raporlar" style={{ color: "var(--accent)" }}>
+              Raporlar
+            </Link>{" "}
+            — CSV ve yazdırılabilir HTML/PDF
+          </li>
+        </ul>
       </section>
     </div>
   );

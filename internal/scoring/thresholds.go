@@ -148,6 +148,9 @@ var thresholdSpecs = map[string]thresholdSpec{
 	"ap_degradation_customer_ratio_critical": {0, 1},
 	"severity_healthy_at":                    {0, 100},
 	"severity_warning_at":                    {0, 100},
+	// Phase 7 — work order operasyonel eşikleri.
+	"work_order_duplicate_cooldown_days": {0, 365},
+	"work_order_default_eta_hours":       {0, 720},
 }
 
 // IsKnownThresholdKey, bilinen bir eşik anahtarı mıdır?

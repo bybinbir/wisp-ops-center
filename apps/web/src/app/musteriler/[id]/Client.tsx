@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   api,
   ApiError,
   CustomerSignalScore,
   WorkOrderCandidate,
+  WorkOrder,
   Severity,
   Diagnosis,
   DIAGNOSIS_LABELS,
@@ -99,6 +101,47 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
             ? e.message
             : "Aday oluşturulamadı";
       alert(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function promote(candidateId: string) {
+    setBusy(true);
+    try {
+      const res = await api.post<{ data: WorkOrder; duplicate: boolean }>(
+        `/api/v1/work-order-candidates/${candidateId}/promote`,
+        {}
+      );
+      if (res.duplicate) {
+        alert(
+          "Bu aday zaten iş emrine dönüştürülmüş. Mevcut iş emrine yönlendiriliyor."
+        );
+      }
+      window.location.href = `/is-emirleri/${res.data.id}`;
+    } catch (e) {
+      const msg =
+        e instanceof ApiError && e.status === 422
+          ? "Aday promote edilemez (kapatılmış olabilir)."
+          : e instanceof Error
+            ? e.message
+            : "Promote başarısız";
+      alert(msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dismiss(candidateId: string) {
+    if (!confirm("Adayı dismiss etmek istediğinizden emin misiniz?")) return;
+    setBusy(true);
+    try {
+      await api.patch(`/api/v1/work-order-candidates/${candidateId}`, {
+        status: "dismissed",
+      });
+      await reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Dismiss başarısız");
     } finally {
       setBusy(false);
     }
@@ -271,6 +314,7 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                 <th>Önerilen Aksiyon</th>
                 <th>Status</th>
                 <th>Oluşturulma</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -284,8 +328,40 @@ export function CustomerDetailClient({ customerId }: { customerId: string }) {
                     {ACTION_LABELS[c.recommended_action] ??
                       c.recommended_action}
                   </td>
-                  <td>{c.status}</td>
+                  <td>
+                    {c.status}
+                    {c.promoted_work_order_id ? (
+                      <>
+                        {" · "}
+                        <Link
+                          href={`/is-emirleri/${c.promoted_work_order_id}`}
+                          style={{ color: "var(--accent)" }}
+                        >
+                          iş emri →
+                        </Link>
+                      </>
+                    ) : null}
+                  </td>
                   <td>{new Date(c.created_at).toLocaleString("tr-TR")}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {c.status === "open" ? (
+                      <>
+                        <Button
+                          onClick={() => promote(c.id)}
+                          disabled={busy}
+                        >
+                          İş Emrine Çevir
+                        </Button>{" "}
+                        <Button
+                          variant="secondary"
+                          onClick={() => dismiss(c.id)}
+                          disabled={busy}
+                        >
+                          Dismiss
+                        </Button>
+                      </>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

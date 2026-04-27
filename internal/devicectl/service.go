@@ -75,6 +75,9 @@ type credentialLookup struct {
 	tlsVerify             bool
 	sshHostKeyPolicy      string
 	sshHostKeyFingerprint string
+	// Faz 7 — TLS hardening alanları.
+	caCertificatePEM   string
+	serverNameOverride string
 }
 
 // loadCredential picks the highest-priority enabled binding. Phase 4:
@@ -84,9 +87,11 @@ type credentialLookup struct {
 func (s *Service) loadCredential(ctx context.Context, deviceID string) (*credentialLookup, error) {
 	row := s.P.QueryRow(ctx, `
 SELECT cp.auth_type, COALESCE(cp.username,''), cp.port, cp.secret_ciphertext, cp.id::text,
-       COALESCE(cp.tls_verify, FALSE),
+       COALESCE(cp.verify_tls, FALSE),
        COALESCE(cp.ssh_host_key_policy,'insecure_ignore'),
-       COALESCE(cp.ssh_host_key_fingerprint,'')
+       COALESCE(cp.ssh_host_key_fingerprint,''),
+       COALESCE(cp.ca_certificate_pem,''),
+       COALESCE(cp.server_name_override,'')
   FROM device_credentials dc
   JOIN credential_profiles cp ON cp.id = dc.profile_id
  WHERE dc.device_id = $1 AND dc.enabled = TRUE
@@ -100,7 +105,8 @@ SELECT cp.auth_type, COALESCE(cp.username,''), cp.port, cp.secret_ciphertext, cp
  LIMIT 1`, deviceID)
 	var c credentialLookup
 	err := row.Scan(&c.authType, &c.username, &c.port, &c.cipherText, &c.profileID,
-		&c.tlsVerify, &c.sshHostKeyPolicy, &c.sshHostKeyFingerprint)
+		&c.tlsVerify, &c.sshHostKeyPolicy, &c.sshHostKeyFingerprint,
+		&c.caCertificatePEM, &c.serverNameOverride)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, mikrotik.ErrCredentialMissing
 	}
@@ -179,6 +185,8 @@ func (s *Service) probeMikroTik(ctx context.Context, dev *deviceLookup, actor st
 		VerifyTLS:             cred.tlsVerify,
 		SSHHostKeyPolicy:      cred.sshHostKeyPolicy,
 		SSHHostKeyFingerprint: cred.sshHostKeyFingerprint,
+		CACertificatePEM:      cred.caCertificatePEM,
+		ServerNameOverride:    cred.serverNameOverride,
 	}
 	if cred.port != nil {
 		cfg.Port = *cred.port
@@ -252,6 +260,8 @@ func (s *Service) pollMikroTik(ctx context.Context, dev *deviceLookup, actor str
 		VerifyTLS:             cred.tlsVerify,
 		SSHHostKeyPolicy:      cred.sshHostKeyPolicy,
 		SSHHostKeyFingerprint: cred.sshHostKeyFingerprint,
+		CACertificatePEM:      cred.caCertificatePEM,
+		ServerNameOverride:    cred.serverNameOverride,
 	}
 	if cred.port != nil {
 		cfg.Port = *cred.port

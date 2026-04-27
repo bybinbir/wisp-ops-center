@@ -18,24 +18,28 @@ import (
 	"github.com/wisp-ops-center/wisp-ops-center/internal/database"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/devicectl"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/inventory"
+	"github.com/wisp-ops-center/wisp-ops-center/internal/reports"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scheduler"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scoring"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/telemetry"
+	"github.com/wisp-ops-center/wisp-ops-center/internal/workorders"
 )
 
 type Server struct {
 	*http.Server
-	cfg     *config.Config
-	db      *database.Pool
-	log     *slog.Logger
-	inv     *inventory.Repository
-	creds   *credentials.Repository
-	tel     *telemetry.Repository
-	devCtl  *devicectl.Service
-	sched   *scheduler.Repository
-	scoring *scoring.Repository
-	hydrate *scoring.Hydrator
-	auditor audit.Sink
+	cfg        *config.Config
+	db         *database.Pool
+	log        *slog.Logger
+	inv        *inventory.Repository
+	creds      *credentials.Repository
+	tel        *telemetry.Repository
+	devCtl     *devicectl.Service
+	sched      *scheduler.Repository
+	scoring    *scoring.Repository
+	hydrate    *scoring.Hydrator
+	auditor    audit.Sink
+	workOrders *workorders.Repository
+	reports    *reports.Repository
 }
 
 // New returns a configured HTTP server.
@@ -66,6 +70,9 @@ func New(cfg *config.Config, db *database.Pool, log *slog.Logger) *Server {
 		s.sched = scheduler.NewRepository(db.P)
 		s.scoring = scoring.NewRepository(db.P)
 		s.hydrate = scoring.NewHydrator(db.P)
+		// Faz 7: gerçek iş emri ve rapor repolari.
+		s.workOrders = workorders.NewRepository(db.P)
+		s.reports = reports.NewRepository(db.P)
 		// Faz 6: SSH TOFU/Pinned politikası için Postgres-backed
 		// known_hosts store global olarak set edilir.
 		mikrotik.SetGlobalKnownHostsStore(&scheduler.SSHKnownHostsStore{P: db.P})

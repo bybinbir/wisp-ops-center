@@ -284,3 +284,115 @@ export type TowerRiskRow = {
   reasons: string[];
   calculated_at: string;
 };
+
+// ─── Faz 7 — Work Orders & Reports ─────────────────────────────────────────
+
+export const WORK_ORDER_STATUSES = [
+  "open",
+  "assigned",
+  "in_progress",
+  "resolved",
+  "cancelled",
+] as const;
+export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
+
+export const WORK_ORDER_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+export type WorkOrderPriority = (typeof WORK_ORDER_PRIORITIES)[number];
+
+export const STATUS_LABELS: Record<WorkOrderStatus, string> = {
+  open: "Açık",
+  assigned: "Atandı",
+  in_progress: "İşlemde",
+  resolved: "Çözüldü",
+  cancelled: "İptal",
+};
+
+export const PRIORITY_LABELS: Record<WorkOrderPriority, string> = {
+  urgent: "ÇOK ACİL",
+  high: "Yüksek",
+  medium: "Orta",
+  low: "Düşük",
+};
+
+export type WorkOrder = {
+  id: string;
+  customer_id?: string | null;
+  ap_device_id?: string | null;
+  tower_id?: string | null;
+  source_candidate_id?: string | null;
+  source_score_id?: string | null;
+  diagnosis: string;
+  recommended_action: string;
+  severity: Severity;
+  title: string;
+  description: string;
+  status: WorkOrderStatus;
+  priority: WorkOrderPriority;
+  assigned_to?: string | null;
+  eta_at?: string | null;
+  resolved_at?: string | null;
+  resolution_note?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkOrderEvent = {
+  id: string;
+  work_order_id: string;
+  event_type: string;
+  old_value?: string | null;
+  new_value?: string | null;
+  note?: string | null;
+  actor: string;
+  created_at: string;
+};
+
+export type ExecutiveSummary = {
+  generated_at: string;
+  period_start: string;
+  period_end: string;
+  total_customers: number;
+  critical_customers: number;
+  warning_customers: number;
+  stale_customers: number;
+  ap_wide_interference_customers: number;
+  top10_risky_aps: Array<{
+    ap_device_id: string;
+    ap_device_name?: string;
+    tower_id?: string | null;
+    tower_name?: string | null;
+    ap_score: number;
+    severity: Severity;
+    total_customers: number;
+    critical_customers: number;
+    warning_customers: number;
+    healthy_customers: number;
+    degradation_ratio: number;
+    is_ap_wide_interference: boolean;
+    calculated_at: string;
+  }>;
+  top10_risky_towers: Array<{
+    tower_id: string;
+    tower_name?: string;
+    risk_score: number;
+    severity: Severity;
+    calculated_at: string;
+  }>;
+  top10_diagnoses: Array<{ diagnosis: string; count: number }>;
+  open_work_orders: number;
+  urgent_or_high_priority_work_orders: number;
+  overdue_eta_work_orders: number;
+  created_today_work_orders: number;
+  trend_7d: Array<{
+    day: string;
+    critical: number;
+    warning: number;
+    healthy: number;
+  }>;
+  trend_30d: Array<{
+    day: string;
+    critical: number;
+    warning: number;
+    healthy: number;
+  }>;
+};

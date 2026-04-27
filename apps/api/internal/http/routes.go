@@ -32,9 +32,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/maintenance-windows/", s.handleMaintenanceWindowItem)
 	mux.HandleFunc("/api/v1/ap-client-test-runs/run-now", s.handleAPClientRunNow)
 	mux.HandleFunc("/api/v1/ap-client-test-results", s.handleAPClientResults)
-	mux.HandleFunc("/api/v1/reports", stub("reports.list"))
+	mux.HandleFunc("/api/v1/reports", s.handleReportsRoot)
+	mux.HandleFunc("/api/v1/reports/", s.handleReportsDispatch)
 	mux.HandleFunc("/api/v1/frequency-recommendations", stub("frequency_recommendations.list"))
 	mux.HandleFunc("/api/v1/audit-logs", s.handleAuditLogs)
+	mux.HandleFunc("/api/v1/audit/export", s.handleAuditExport)
+	mux.HandleFunc("/api/v1/audit/export.json", s.handleAuditExport)
+	mux.HandleFunc("/api/v1/audit/export.ndjson", s.handleAuditExport)
 
 	mux.HandleFunc("/api/v1/mikrotik/poll-results", s.handleMikrotikPollResults)
 	mux.HandleFunc("/api/v1/mimosa/poll-results", s.handleMimosaPollResults)
@@ -43,7 +47,77 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/scoring/run", s.handleScoringRun)
 	mux.HandleFunc("/api/v1/scoring-thresholds", s.handleScoringThresholds)
 	mux.HandleFunc("/api/v1/work-order-candidates", s.handleWorkOrderCandidates)
-	mux.HandleFunc("/api/v1/work-order-candidates/", s.handleWorkOrderCandidateItem)
+	mux.HandleFunc("/api/v1/work-order-candidates/", s.handleWorkOrderCandidatesItemDispatch)
+
+	// Faz 7 — Gerçek iş emirleri + raporlar
+	mux.HandleFunc("/api/v1/work-orders", s.handleWorkOrdersCollection)
+	mux.HandleFunc("/api/v1/work-orders/", s.handleWorkOrderItem)
+}
+
+// handleReportsRoot, /api/v1/reports kökü — snapshot listesi.
+func (s *Server) handleReportsRoot(w http.ResponseWriter, r *http.Request) {
+	if !s.reportsAvailable(w) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	rt := r.URL.Query().Get("type")
+	limit := 50
+	rows, err := s.reports.ListSnapshots(r.Context(), rt, limit)
+	if err != nil {
+		s.log.Warn("reports_list_failed", "err", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": rows})
+}
+
+// handleReportsDispatch, /api/v1/reports/<name>[.csv|.pdf] dispatch.
+func (s *Server) handleReportsDispatch(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/reports/")
+	// extension'ı çıkar.
+	name := rest
+	if i := strings.LastIndexByte(rest, '.'); i > 0 {
+		// .csv / .pdf / .json suffixleri name'e dahil; handler'lar path'den okur.
+		name = rest[:i]
+	}
+	switch name {
+	case "executive-summary":
+		if strings.HasSuffix(rest, ".pdf") || strings.HasSuffix(rest, ".html") {
+			s.handleReportsExecutiveSummaryHTML(w, r)
+			return
+		}
+		s.handleReportsExecutiveSummary(w, r)
+	case "problem-customers":
+		s.handleReportsProblemCustomers(w, r)
+	case "ap-health":
+		s.handleReportsAPHealth(w, r)
+	case "tower-risk":
+		s.handleReportsTowerRisk(w, r)
+	case "work-orders":
+		s.handleReportsWorkOrders(w, r)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+	}
+}
+
+// handleWorkOrderCandidatesItemDispatch, /api/v1/work-order-candidates/{id}[/promote]
+// Phase 7: promote alt-yolu eklendi; default davranış Phase 6'daki PATCH'tir.
+func (s *Server) handleWorkOrderCandidatesItemDispatch(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/work-order-candidates/")
+	if rest == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		return
+	}
+	parts := strings.SplitN(rest, "/", 2)
+	id := parts[0]
+	if len(parts) == 2 && parts[1] == "promote" {
+		s.handleWorkOrderCandidatePromote(w, r, id)
+		return
+	}
+	s.handleWorkOrderCandidateItem(w, r)
 }
 
 // handleCustomersItemDispatch, /api/v1/customers/{id}/{action} dispatch.
@@ -105,7 +179,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ok",
 		"service":    "wisp-ops-api",
-		"phase":      6,
+		"phase":      7,
 		"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		"go_version": runtime.Version(),
 		"db":         dbStatus,
@@ -130,7 +204,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": "wisp-ops-center API",
-		"phase":   6,
+		"phase":   7,
 		"routes": []string{
 			"/api/v1/health",
 			"/api/v1/sites",
@@ -173,6 +247,28 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"/api/v1/scoring-thresholds",
 			"/api/v1/work-order-candidates",
 			"/api/v1/work-order-candidates/{id}",
+			"/api/v1/work-order-candidates/{id}/promote",
+			"/api/v1/work-orders",
+			"/api/v1/work-orders/{id}",
+			"/api/v1/work-orders/{id}/events",
+			"/api/v1/work-orders/{id}/assign",
+			"/api/v1/work-orders/{id}/resolve",
+			"/api/v1/work-orders/{id}/cancel",
+			"/api/v1/reports",
+			"/api/v1/reports/executive-summary",
+			"/api/v1/reports/executive-summary.pdf",
+			"/api/v1/reports/problem-customers",
+			"/api/v1/reports/problem-customers.csv",
+			"/api/v1/reports/ap-health",
+			"/api/v1/reports/ap-health.csv",
+			"/api/v1/reports/tower-risk",
+			"/api/v1/reports/tower-risk.csv",
+			"/api/v1/reports/work-orders",
+			"/api/v1/reports/work-orders.csv",
+			"/api/v1/reports/work-orders.pdf",
+			"/api/v1/audit/export",
+			"/api/v1/audit/export.json",
+			"/api/v1/audit/export.ndjson",
 		},
 	})
 }

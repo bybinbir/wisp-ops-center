@@ -20,7 +20,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         WISP Ops Center
-        <small>Faz 6 · skor + sorunlu müşteri</small>
+        <small>Faz 7 · iş emirleri + raporlar</small>
       </div>
       {NAV.map((item) => (
         <Link key={item.href} href={item.href} className="sidebar-link">

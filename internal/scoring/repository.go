@@ -458,9 +458,17 @@ type CreateWorkOrderCandidateInput struct {
 
 // CreateCandidateOutcome, oluşturma çıktısıdır. Eğer aynı müşteri+tanı için
 // halihazırda açık bir aday varsa Duplicate=true, ID o aday döner.
+//
+// Faz 7 — DuplicateReason değerleri:
+//   - "duplicate_open_candidate"  → status=open mevcut
+//   - "already_promoted"          → status=promoted, gerçek iş emri var
+//   - "recently_dismissed"        → status=dismissed, cooldown içinde
+//   - "recently_cancelled"        → status=cancelled, cooldown içinde
 type CreateCandidateOutcome struct {
-	ID        string
-	Duplicate bool
+	ID              string
+	Duplicate       bool
+	DuplicateReason string
+	CooldownDays    int
 }
 
 // CreateWorkOrderCandidate, yeni iş emri adayı ekler.
@@ -469,6 +477,18 @@ type CreateCandidateOutcome struct {
 // olan bir aday varsa yenisi oluşturulmaz; mevcut adayın id'si döner ve
 // Outcome.Duplicate=true işaretlenir. severity 'critical' / 'warning'
 // dışındaysa hata döner (yalnızca sorunlu skorlar aday üretir).
+//
+// Faz 7 ek: Cooldown genişletmesi.
+//
+//   - status='open' aday varsa eskisi gibi Duplicate=true döner
+//     (DuplicateReason="duplicate_open_candidate").
+//   - status='promoted' aday varsa Duplicate=true,
+//     DuplicateReason="already_promoted" döner.
+//   - status='dismissed' veya 'cancelled' aday varsa, eşik tablosundaki
+//     work_order_duplicate_cooldown_days değerine göre updated_at >= now()
+//   - cooldown ise Duplicate=true ve DuplicateReason="recently_dismissed"
+//     veya "recently_cancelled" döner.
+//   - Aksi halde yeni satır eklenir.
 func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWorkOrderCandidateInput) (CreateCandidateOutcome, error) {
 	if in.Severity != string(SeverityWarning) && in.Severity != string(SeverityCritical) {
 		return CreateCandidateOutcome{}, errors.New("scoring: only warning/critical severities can create work order candidates")
@@ -477,21 +497,89 @@ func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWork
 		return CreateCandidateOutcome{}, errors.New("scoring: diagnosis required")
 	}
 
-	// Duplicate guard — yalnızca müşteri bazlı (en yaygın akış).
+	cooldownDays := r.LoadDuplicateCooldownDays(ctx)
+
 	if in.CustomerID != nil && *in.CustomerID != "" {
-		var existing string
+		// Önce open aday — varsa hemen döner.
+		var openID string
 		err := r.P.QueryRow(ctx, `
 			SELECT id::text FROM work_order_candidates
 			 WHERE customer_id = $1::uuid
 			   AND diagnosis  = $2
 			   AND status     = 'open'
 			 ORDER BY created_at DESC
-			 LIMIT 1`, *in.CustomerID, in.Diagnosis).Scan(&existing)
-		if err == nil && existing != "" {
-			return CreateCandidateOutcome{ID: existing, Duplicate: true}, nil
+			 LIMIT 1`, *in.CustomerID, in.Diagnosis).Scan(&openID)
+		if err == nil && openID != "" {
+			return CreateCandidateOutcome{
+				ID:              openID,
+				Duplicate:       true,
+				DuplicateReason: "duplicate_open_candidate",
+				CooldownDays:    cooldownDays,
+			}, nil
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return CreateCandidateOutcome{}, err
+		}
+
+		// Promoted bir aday var mı?
+		var promotedID string
+		var promotedWO *string
+		err = r.P.QueryRow(ctx, `
+			SELECT id::text, promoted_work_order_id::text FROM work_order_candidates
+			 WHERE customer_id = $1::uuid
+			   AND diagnosis  = $2
+			   AND status     = 'promoted'
+			 ORDER BY updated_at DESC
+			 LIMIT 1`, *in.CustomerID, in.Diagnosis).Scan(&promotedID, &promotedWO)
+		if err == nil && promotedID != "" {
+			// Promoted iş emri hâlâ aktif (resolved/cancelled değil) ise yeni
+			// aday üretmeyelim — operatör mevcut iş emrini takip etsin.
+			if promotedWO != nil && *promotedWO != "" {
+				var status string
+				err := r.P.QueryRow(ctx,
+					`SELECT status FROM work_orders WHERE id = $1::uuid`, *promotedWO).
+					Scan(&status)
+				if err == nil && status != "resolved" && status != "cancelled" {
+					return CreateCandidateOutcome{
+						ID:              promotedID,
+						Duplicate:       true,
+						DuplicateReason: "already_promoted",
+						CooldownDays:    cooldownDays,
+					}, nil
+				}
+			}
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return CreateCandidateOutcome{}, err
+		}
+
+		// Cooldown — dismissed / cancelled.
+		if cooldownDays > 0 {
+			var recentID, recentStatus string
+			err = r.P.QueryRow(ctx, `
+				SELECT id::text, status FROM work_order_candidates
+				 WHERE customer_id = $1::uuid
+				   AND diagnosis  = $2
+				   AND status IN ('dismissed','cancelled')
+				   AND updated_at >= now() - ($3 || ' days')::interval
+				 ORDER BY updated_at DESC
+				 LIMIT 1`, *in.CustomerID, in.Diagnosis, cooldownDays).
+				Scan(&recentID, &recentStatus)
+			if err == nil && recentID != "" {
+				reason := "recently_dismissed"
+				if recentStatus == "cancelled" {
+					reason = "recently_cancelled"
+				}
+				return CreateCandidateOutcome{
+					ID:              recentID,
+					Duplicate:       true,
+					DuplicateReason: reason,
+					CooldownDays:    cooldownDays,
+				}, nil
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return CreateCandidateOutcome{}, err
+			}
 		}
 	}
 
@@ -512,7 +600,27 @@ func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWork
 	if err != nil {
 		return CreateCandidateOutcome{}, err
 	}
-	return CreateCandidateOutcome{ID: id, Duplicate: false}, nil
+	return CreateCandidateOutcome{ID: id, Duplicate: false, CooldownDays: cooldownDays}, nil
+}
+
+// LoadDuplicateCooldownDays, scoring_thresholds tablosundan
+// work_order_duplicate_cooldown_days değerini okur. Bulamazsa 7 döner
+// (Faz 7 varsayılanı).
+func (r *Repository) LoadDuplicateCooldownDays(ctx context.Context) int {
+	if r == nil || r.P == nil {
+		return 7
+	}
+	var v float64
+	err := r.P.QueryRow(ctx,
+		`SELECT value FROM scoring_thresholds WHERE key = 'work_order_duplicate_cooldown_days'`).
+		Scan(&v)
+	if err != nil {
+		return 7
+	}
+	if v < 0 {
+		return 0
+	}
+	return int(v)
 }
 
 // ListWorkOrderCandidates, açık (open) adayları döner.
@@ -554,9 +662,9 @@ func (r *Repository) ListWorkOrderCandidates(ctx context.Context, status string,
 	return out, rows.Err()
 }
 
-// UpdateCandidateStatus, "open" → "dismissed" / "promoted".
+// UpdateCandidateStatus, "open" → "dismissed" / "promoted" / "cancelled".
 func (r *Repository) UpdateCandidateStatus(ctx context.Context, id, status string, notes *string) error {
-	if status != "open" && status != "dismissed" && status != "promoted" {
+	if status != "open" && status != "dismissed" && status != "promoted" && status != "cancelled" {
 		return errors.New("scoring: invalid candidate status")
 	}
 	tag, err := r.P.Exec(ctx, `
