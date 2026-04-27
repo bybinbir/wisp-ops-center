@@ -1,0 +1,44 @@
+# wisp-ops-center: tutarlı satır sonu kuralları.
+#
+# Sebep: Windows'ta core.autocrlf=true ile checkout edilen Go dosyaları
+# CRLF olarak yazılır. gofmt LF beklediği için `gofmt -l` bunları "needs
+# format" olarak listeliyordu — repo aslında LF tutuyordu, sadece working
+# tree'de CRLF görünüyordu.
+#
+# Bu dosya checkout EOL'unu LF'e sabitler. Cross-platform CI/lint için
+# gerekli.
+
+# Default — text dosyalar LF olarak normalize edilir.
+* text=auto eol=lf
+
+# Go ekosistemi
+*.go         text eol=lf
+*.mod        text eol=lf
+*.sum        text eol=lf
+
+# Frontend
+*.ts         text eol=lf
+*.tsx        text eol=lf
+*.js         text eol=lf
+*.jsx        text eol=lf
+*.mjs        text eol=lf
+*.json       text eol=lf
+*.css        text eol=lf
+
+# Migrations & docs
+*.sql        text eol=lf
+*.md         text eol=lf
+*.yaml       text eol=lf
+*.yml        text eol=lf
+*.toml       text eol=lf
+
+# Shell scripts (LF zorunlu)
+*.sh         text eol=lf
+
+# Binary — git'e text dönüşümü yapma
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.ico        binary
+*.pdf        binary
