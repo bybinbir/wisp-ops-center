@@ -30,6 +30,18 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	actorVal := q.Get("actor")
 	dateFromS := q.Get("date_from")
 	dateToS := q.Get("date_to")
+	// Defensive caps — audit_logs.action ve audit_logs.actor kolonları normalde
+	// kısa değerler tutar (auth.login_attempt, work_order.created vb.). Çok uzun
+	// filtre değerleri Postgres'te slow scan + büyük log payload anlamına gelir.
+	const maxFilterLen = 200
+	if len(action) > maxFilterLen || len(actorVal) > maxFilterLen ||
+		len(dateFromS) > maxFilterLen || len(dateToS) > maxFilterLen {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "filter_value_too_long",
+			"hint":  "action / actor / date_from / date_to ≤ 200 karakter",
+		})
+		return
+	}
 	limit := 5000
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

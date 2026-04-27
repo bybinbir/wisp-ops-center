@@ -3,12 +3,20 @@ package reports
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// pgUndefinedTable, Postgres SQLSTATE 42P01 (relation does not exist).
+// BuildExecutiveSummary çağrılırken Phase 7 migration uygulanmadıysa
+// work_orders tablosu yoktur; bu durumda iş emri sayaçlarını sıfırda
+// bırakıp diğer aggregate'leri döndürmeye devam ederiz.
+const pgUndefinedTable = "42P01"
 
 // Repository, executive summary ve detay rapor sorgularını çalıştırır.
 type Repository struct {
@@ -199,7 +207,8 @@ SELECT
 	}
 	es.Top10Diagnoses = diag
 
-	// İş emri sayaçları.
+	// İş emri sayaçları. Phase 7 migration uygulanmadıysa work_orders
+	// tablosu olmayabilir → SQLSTATE 42P01 ise sıfır bırakıp devam et.
 	woRow := r.P.QueryRow(ctx, `
 SELECT
   COUNT(*) FILTER (WHERE status NOT IN ('resolved','cancelled'))                                            AS open_total,
@@ -209,8 +218,8 @@ SELECT
 FROM work_orders`)
 	if err := woRow.Scan(&es.OpenWorkOrders, &es.UrgentOrHighPrio,
 		&es.OverdueETA, &es.CreatedToday); err != nil {
-		// work_orders tablosu yoksa (migration uygulanmamışsa) sıfır bırak.
-		if !strings.Contains(err.Error(), "work_orders") {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != pgUndefinedTable {
 			return es, err
 		}
 	}
@@ -238,7 +247,7 @@ SELECT date_trunc('day', calculated_at) AS day,
        COUNT(*) FILTER (WHERE severity = 'warning')  AS warning,
        COUNT(*) FILTER (WHERE severity = 'healthy')  AS healthy
   FROM customer_signal_scores
- WHERE calculated_at >= now() - ($1 || ' days')::interval
+ WHERE calculated_at >= now() - make_interval(days => $1::int)
  GROUP BY day
  ORDER BY day ASC`, days)
 	if err != nil {

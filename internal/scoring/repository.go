@@ -561,7 +561,7 @@ func (r *Repository) CreateWorkOrderCandidate(ctx context.Context, in CreateWork
 				 WHERE customer_id = $1::uuid
 				   AND diagnosis  = $2
 				   AND status IN ('dismissed','cancelled')
-				   AND updated_at >= now() - ($3 || ' days')::interval
+				   AND updated_at >= now() - make_interval(days => $3::int)
 				 ORDER BY updated_at DESC
 				 LIMIT 1`, *in.CustomerID, in.Diagnosis, cooldownDays).
 				Scan(&recentID, &recentStatus)

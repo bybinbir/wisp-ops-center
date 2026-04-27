@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -284,7 +285,7 @@ func (s *Server) handleWorkOrderResolve(w http.ResponseWriter, r *http.Request, 
 	var body struct {
 		Note string `json:"note,omitempty"`
 	}
-	if err := readJSON(r, &body); err != nil && err.Error() != "EOF" {
+	if err := readJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
 		// Boş gövde kabul edilebilir; ama unknown_field dönmemeli.
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
@@ -323,7 +324,7 @@ func (s *Server) handleWorkOrderCancel(w http.ResponseWriter, r *http.Request, i
 	var body struct {
 		Note string `json:"note,omitempty"`
 	}
-	if err := readJSON(r, &body); err != nil && err.Error() != "EOF" {
+	if err := readJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
@@ -372,7 +373,7 @@ func (s *Server) handleWorkOrderCandidatePromote(w http.ResponseWriter, r *http.
 		AssignedTo  *string    `json:"assigned_to,omitempty"`
 		ETAAt       *time.Time `json:"eta_at,omitempty"`
 	}
-	if err := readJSON(r, &body); err != nil && err.Error() != "EOF" {
+	if err := readJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_body"})
 		return
 	}
