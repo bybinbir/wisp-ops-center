@@ -39,34 +39,34 @@ type Device struct {
 
 // Run is the DB-row projection of a discovery_runs entry.
 type Run struct {
-	ID            string         `json:"id"`
-	Source        string         `json:"source"`
-	CorrelationID string         `json:"correlation_id"`
-	StartedAt     time.Time      `json:"started_at"`
-	FinishedAt    *time.Time     `json:"finished_at,omitempty"`
-	Status        string         `json:"status"`
-	DeviceCount   int            `json:"device_count"`
-	APCount       int            `json:"ap_count"`
-	CPECount      int            `json:"cpe_count"`
-	BridgeCount   int            `json:"bridge_count"`
-	LinkCount     int            `json:"link_count"`
-	RouterCount   int            `json:"router_count"`
-	SwitchCount   int            `json:"switch_count"`
-	UnknownCount  int            `json:"unknown_count"`
-	LowConfCount  int            `json:"low_conf_count"`
-	ErrorCode     string         `json:"error_code,omitempty"`
-	ErrorMessage  string         `json:"error_message,omitempty"`
-	CommandsRun   []string       `json:"commands_run"`
-	TriggeredBy   string         `json:"triggered_by"`
-	CreatedAt     time.Time      `json:"created_at"`
+	ID            string     `json:"id"`
+	Source        string     `json:"source"`
+	CorrelationID string     `json:"correlation_id"`
+	StartedAt     time.Time  `json:"started_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	Status        string     `json:"status"`
+	DeviceCount   int        `json:"device_count"`
+	APCount       int        `json:"ap_count"`
+	CPECount      int        `json:"cpe_count"`
+	BridgeCount   int        `json:"bridge_count"`
+	LinkCount     int        `json:"link_count"`
+	RouterCount   int        `json:"router_count"`
+	SwitchCount   int        `json:"switch_count"`
+	UnknownCount  int        `json:"unknown_count"`
+	LowConfCount  int        `json:"low_conf_count"`
+	ErrorCode     string     `json:"error_code,omitempty"`
+	ErrorMessage  string     `json:"error_message,omitempty"`
+	CommandsRun   []string   `json:"commands_run"`
+	TriggeredBy   string     `json:"triggered_by"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // Filter narrows down a device listing.
 type Filter struct {
-	Category      string
-	Status        string
-	OnlyLowConf   bool
-	OnlyUnknown   bool
-	Limit         int
-	Offset        int
+	Category    string
+	Status      string
+	OnlyLowConf bool
+	OnlyUnknown bool
+	Limit       int
+	Offset      int
 }

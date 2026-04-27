@@ -45,10 +45,10 @@ type Server struct {
 	reports    *reports.Repository
 
 	// Phase 8 — MikroTik Dude discovery + network inventory
-	netInv         *networkinv.Repository
-	netActions     *networkactions.Registry
-	dudeRunMu      sync.Mutex // serialize discovery runs (one at a time)
-	dudeRunActive  bool       // true while a run is in flight
+	netInv        *networkinv.Repository
+	netActions    *networkactions.Registry
+	dudeRunMu     sync.Mutex // serialize discovery runs (one at a time)
+	dudeRunActive bool       // true while a run is in flight
 }
 
 // New returns a configured HTTP server.
