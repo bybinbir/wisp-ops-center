@@ -219,19 +219,50 @@ func (s *Server) runDudeDiscoveryAsync(runID, correlationID string, cfg dude.Con
 	if res.Success && res.ErrorCode == "" {
 		finishOutcome = audit.OutcomeSuccess
 	}
+	// Phase 8.1 — surface enrichment + classification health to the
+	// audit log. Every value here is sanitized: source labels are
+	// hard-coded (dude_device / ip_neighbor / dude_probe /
+	// dude_service / dude_self), counts are integers, and durations
+	// are millisecond ints. NEVER include error_message text from
+	// SourceStatus directly here — that's already redacted, but we
+	// only need the per-source status anyway.
+	attempted := make([]string, 0, len(res.Sources))
+	succeeded := make([]string, 0, len(res.Sources))
+	skipped := make([]string, 0, len(res.Sources))
+	statusBySource := make(map[string]string, len(res.Sources))
+	for _, src := range res.Sources {
+		attempted = append(attempted, src.Source)
+		statusBySource[src.Source] = src.Status
+		switch src.Status {
+		case "succeeded":
+			succeeded = append(succeeded, src.Source)
+		case "skipped_unsupported", "skipped_empty":
+			skipped = append(skipped, src.Source)
+		}
+	}
 	s.audit(ctx, audit.Entry{
 		Actor:   "system",
 		Action:  audit.Action("network.dude.run.finish"),
 		Outcome: finishOutcome,
 		Subject: cfg.Host,
 		Metadata: map[string]any{
-			"run_id":         runID,
-			"correlation_id": correlationID,
-			"device_count":   res.Stats.Total,
-			"inserted_count": persistStats.Inserted,
-			"updated_count":  persistStats.Updated,
-			"skipped_count":  persistStats.Skipped,
-			"error_code":     res.ErrorCode,
+			"run_id":                       runID,
+			"correlation_id":               correlationID,
+			"device_count":                 res.Stats.Total,
+			"inserted_count":               persistStats.Inserted,
+			"updated_count":                persistStats.Updated,
+			"skipped_count":                persistStats.Skipped,
+			"error_code":                   res.ErrorCode,
+			"category_unknown":             res.Stats.Unknown,
+			"low_confidence_count":         res.Stats.LowConfidence,
+			"with_mac_count":               res.Stats.WithMAC,
+			"with_host_count":              res.Stats.WithHost,
+			"enriched_count":               res.Stats.EnrichedCount,
+			"enrichment_sources_attempted": attempted,
+			"enrichment_sources_succeeded": succeeded,
+			"enrichment_sources_skipped":   skipped,
+			"enrichment_duration_ms":       res.EnrichmentMS,
+			"source_status":                statusBySource,
 		},
 	})
 }
@@ -264,11 +295,15 @@ func (s *Server) handleNetworkDevices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	boolish := func(v string) bool { return v == "1" || v == "true" }
 	f := networkinv.Filter{
-		Category:    q.Get("category"),
-		Status:      q.Get("status"),
-		OnlyLowConf: q.Get("low_confidence") == "1" || q.Get("low_confidence") == "true",
-		OnlyUnknown: q.Get("unknown") == "1" || q.Get("unknown") == "true",
+		Category:     q.Get("category"),
+		Status:       q.Get("status"),
+		Source:       q.Get("source"),
+		OnlyLowConf:  boolish(q.Get("low_confidence")),
+		OnlyUnknown:  boolish(q.Get("unknown")),
+		OnlyHasMAC:   boolish(q.Get("has_mac")),
+		OnlyEnriched: boolish(q.Get("enriched")),
 	}
 	if f.Category != "" && !dude.IsValidCategory(f.Category) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -330,10 +365,13 @@ func (s *Server) handleNetworkDeviceItem(w http.ResponseWriter, r *http.Request)
 }
 
 // computeSummary tallies the dashboard cards from a device slice.
+// Phase 8.1 added with_mac, with_host and enriched counts so the
+// inventory page can show how much enrichment actually contributed.
 func computeSummary(rows []networkinv.Device) map[string]int {
 	summary := map[string]int{
 		"total": len(rows), "ap": 0, "cpe": 0, "bridge": 0, "link": 0,
 		"router": 0, "switch": 0, "unknown": 0, "low_confidence": 0,
+		"with_mac": 0, "with_host": 0, "enriched": 0,
 	}
 	for _, d := range rows {
 		switch d.Category {
@@ -354,6 +392,15 @@ func computeSummary(rows []networkinv.Device) map[string]int {
 		}
 		if d.Confidence < 50 {
 			summary["low_confidence"]++
+		}
+		if d.MAC != "" {
+			summary["with_mac"]++
+		}
+		if d.Host != "" {
+			summary["with_host"]++
+		}
+		if d.LastEnrichedAt != nil {
+			summary["enriched"]++
 		}
 	}
 	return summary

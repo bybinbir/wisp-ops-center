@@ -388,6 +388,12 @@ export type NetworkDevice = {
   raw_metadata?: Record<string, string>;
   created_at: string;
   updated_at: string;
+  platform?: string;
+  board?: string;
+  interface_name?: string;
+  evidence_summary?: string;
+  enrichment_sources?: string[];
+  last_enriched_at?: string | null;
 };
 
 export type DiscoveryRun = {
@@ -411,6 +417,13 @@ export type DiscoveryRun = {
   commands_run: string[];
   triggered_by: string;
   created_at: string;
+  enrichment_sources_attempted: string[];
+  enrichment_sources_succeeded: string[];
+  enrichment_sources_skipped: string[];
+  enrichment_duration_ms: number;
+  with_mac_count: number;
+  with_host_count: number;
+  enriched_count: number;
 };
 
 export type DudeTestResult = {
@@ -433,6 +446,9 @@ export type NetworkInventorySummary = {
   switch: number;
   unknown: number;
   low_confidence: number;
+  with_mac: number;
+  with_host: number;
+  enriched: number;
 };
 
 export type ExecutiveSummary = {
