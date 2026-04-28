@@ -347,6 +347,94 @@ export type WorkOrderEvent = {
   created_at: string;
 };
 
+// ─── Faz 8 — MikroTik Dude Discovery + Network Inventory ─────────────────
+
+export const NETWORK_CATEGORIES = [
+  "AP",
+  "BackhaulLink",
+  "Bridge",
+  "CPE",
+  "Router",
+  "Switch",
+  "Unknown",
+] as const;
+export type NetworkCategory = (typeof NETWORK_CATEGORIES)[number];
+
+export const CATEGORY_LABELS: Record<NetworkCategory, string> = {
+  AP: "AP",
+  BackhaulLink: "Backhaul / Link",
+  Bridge: "Bridge",
+  CPE: "CPE / Müşteri",
+  Router: "Router",
+  Switch: "Switch",
+  Unknown: "Bilinmiyor",
+};
+
+export type NetworkDevice = {
+  id: string;
+  source: string;
+  host?: string;
+  name: string;
+  mac?: string;
+  model?: string;
+  os_version?: string;
+  identity?: string;
+  device_type?: string;
+  category: NetworkCategory;
+  confidence: number;
+  status: string;
+  last_seen_at: string;
+  first_seen_at: string;
+  raw_metadata?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscoveryRun = {
+  id: string;
+  source: string;
+  correlation_id: string;
+  started_at: string;
+  finished_at?: string | null;
+  status: "running" | "succeeded" | "failed" | "partial";
+  device_count: number;
+  ap_count: number;
+  cpe_count: number;
+  bridge_count: number;
+  link_count: number;
+  router_count: number;
+  switch_count: number;
+  unknown_count: number;
+  low_conf_count: number;
+  error_code?: string;
+  error_message?: string;
+  commands_run: string[];
+  triggered_by: string;
+  created_at: string;
+};
+
+export type DudeTestResult = {
+  reachable: boolean;
+  duration_ms: number;
+  identity?: string;
+  error?: string;
+  error_code?: string;
+  started_at: string;
+  host: string;
+};
+
+export type NetworkInventorySummary = {
+  total: number;
+  ap: number;
+  cpe: number;
+  bridge: number;
+  link: number;
+  router: number;
+  switch: number;
+  unknown: number;
+  low_confidence: number;
+};
+
 export type ExecutiveSummary = {
   generated_at: string;
   period_start: string;

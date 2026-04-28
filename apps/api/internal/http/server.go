@@ -18,11 +18,14 @@ import (
 	"github.com/wisp-ops-center/wisp-ops-center/internal/database"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/devicectl"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/inventory"
+	"github.com/wisp-ops-center/wisp-ops-center/internal/networkactions"
+	"github.com/wisp-ops-center/wisp-ops-center/internal/networkinv"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/reports"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scheduler"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scoring"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/telemetry"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/workorders"
+	"sync"
 )
 
 type Server struct {
@@ -40,6 +43,12 @@ type Server struct {
 	auditor    audit.Sink
 	workOrders *workorders.Repository
 	reports    *reports.Repository
+
+	// Phase 8 — MikroTik Dude discovery + network inventory
+	netInv        *networkinv.Repository
+	netActions    *networkactions.Registry
+	dudeRunMu     sync.Mutex // serialize discovery runs (one at a time)
+	dudeRunActive bool       // true while a run is in flight
 }
 
 // New returns a configured HTTP server.
@@ -76,9 +85,13 @@ func New(cfg *config.Config, db *database.Pool, log *slog.Logger) *Server {
 		// Faz 6: SSH TOFU/Pinned politikası için Postgres-backed
 		// known_hosts store global olarak set edilir.
 		mikrotik.SetGlobalKnownHostsStore(&scheduler.SSHKnownHostsStore{P: db.P})
+		// Faz 8: ağ envanteri repository + action framework iskeleti.
+		s.netInv = networkinv.NewRepository(db.P)
 	} else {
 		s.auditor = audit.NewMemorySink()
 	}
+	// Action registry her durumda hazır (DB olmasa bile UI'a 503 döneriz).
+	s.netActions = networkactions.NewRegistry()
 
 	mux := http.NewServeMux()
 	s.routes(mux)

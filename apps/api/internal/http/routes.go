@@ -52,6 +52,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// Faz 7 — Gerçek iş emirleri + raporlar
 	mux.HandleFunc("/api/v1/work-orders", s.handleWorkOrdersCollection)
 	mux.HandleFunc("/api/v1/work-orders/", s.handleWorkOrderItem)
+
+	// Faz 8 — MikroTik Dude SSH discovery + Network Inventory
+	mux.HandleFunc("/api/v1/network/discovery/mikrotik-dude/test-connection", s.handleDudeTestConnection)
+	mux.HandleFunc("/api/v1/network/discovery/mikrotik-dude/run", s.handleDudeRunDiscovery)
+	mux.HandleFunc("/api/v1/network/discovery/runs", s.handleDiscoveryRuns)
+	mux.HandleFunc("/api/v1/network/devices", s.handleNetworkDevicesDispatch)
+	mux.HandleFunc("/api/v1/network/devices/", s.handleNetworkDevicesDispatch)
 }
 
 // handleReportsRoot, /api/v1/reports kökü — snapshot listesi.
