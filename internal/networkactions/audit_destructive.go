@@ -36,6 +36,24 @@ const (
 	// because no maintenance window is open at Now or none applies
 	// to the target device.
 	AuditActionMaintenanceWindowDenied DestructiveAuditAction = "network_action.maintenance_window_denied"
+	// network_action.idempotency_reused — Phase 10C. A destructive
+	// request landed with an idempotency_key matching an existing
+	// run. The handler returned the original run id without
+	// reaching the gate or Execute path.
+	AuditActionIdempotencyReused DestructiveAuditAction = "network_action.idempotency_reused"
+	// network_action.rollback_metadata_recorded — Phase 10C. The
+	// destructive request's rollback note + intent were persisted on
+	// the run row before the gate ran. Emitted exactly once per
+	// run so an auditor can match every destructive intent to a
+	// rollback plan.
+	AuditActionRollbackMetadataRecorded DestructiveAuditAction = "network_action.rollback_metadata_recorded"
+	// network_action.destructive_denied — Phase 10C. Terminal event
+	// emitted when the destructive runtime refused a request: the
+	// gate failed, the master switch is closed, or live execution
+	// was requested. Mirrors `gate_fail` / `live_start_blocked` at
+	// a higher level so a single grep can find every refused
+	// destructive intent.
+	AuditActionDestructiveDenied DestructiveAuditAction = "network_action.destructive_denied"
 )
 
 // AuditActionForGateError maps a Phase 10A pre-gate sentinel to the
@@ -57,8 +75,9 @@ func AuditActionForGateError(err error) DestructiveAuditAction {
 }
 
 // DestructiveAuditCatalog returns every audit action name Phase 10A
-// reserves. Tests assert this set matches what TASK_BOARD documents
-// so the catalog cannot drift unnoticed.
+// reserves plus the three Phase 10C lifecycle events. Tests assert
+// this set matches what TASK_BOARD documents so the catalog cannot
+// drift unnoticed.
 func DestructiveAuditCatalog() []DestructiveAuditAction {
 	return []DestructiveAuditAction{
 		AuditActionConfirmed,
@@ -68,5 +87,8 @@ func DestructiveAuditCatalog() []DestructiveAuditAction {
 		AuditActionToggleFlipped,
 		AuditActionRBACDenied,
 		AuditActionMaintenanceWindowDenied,
+		AuditActionIdempotencyReused,
+		AuditActionRollbackMetadataRecorded,
+		AuditActionDestructiveDenied,
 	}
 }
