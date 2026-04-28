@@ -131,10 +131,13 @@ func TestEnsureDestructiveAllowedWithProviders_FullGuardrailMatrix(t *testing.T)
 	}
 }
 
-// TestAuditCatalog_Stable — every audit action name MUST stay stable
-// because downstream consumers grep by literal.
+// TestAuditCatalog_Stable — every Phase 10A audit action name MUST
+// stay stable because downstream consumers grep by literal. Phase
+// 10C extends the catalog with 3 lifecycle events (asserted by
+// TestDestructiveAuditCatalog_Phase10C); the Phase 10A subset stays
+// at the head of the slice in the original order.
 func TestAuditCatalog_Stable(t *testing.T) {
-	want := []DestructiveAuditAction{
+	wantPrefix := []DestructiveAuditAction{
 		"network_action.confirmed",
 		"network_action.gate_fail",
 		"network_action.dry_run",
@@ -144,12 +147,12 @@ func TestAuditCatalog_Stable(t *testing.T) {
 		"network_action.maintenance_window_denied",
 	}
 	got := DestructiveAuditCatalog()
-	if len(got) != len(want) {
-		t.Fatalf("catalog size changed: got %d want %d (%+v)", len(got), len(want), got)
+	if len(got) < len(wantPrefix) {
+		t.Fatalf("catalog shrank: got %d want at least %d (%+v)", len(got), len(wantPrefix), got)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("catalog[%d]: got %q want %q", i, got[i], want[i])
+	for i := range wantPrefix {
+		if got[i] != wantPrefix[i] {
+			t.Errorf("catalog[%d]: got %q want %q", i, got[i], wantPrefix[i])
 		}
 	}
 }

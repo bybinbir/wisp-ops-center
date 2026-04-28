@@ -2,30 +2,47 @@ package networkactions
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PgRBACResolver is the Postgres-backed RBAC boundary. Phase 10B
-// ships the type + interface seam so Phase 10C can drop in a real
-// role/capability store without touching the gate or the API
-// handlers. Today it ALWAYS delegates to the static fallback so
-// production deployments behave identically to dev/test until the
-// real role store lands.
+// shipped the typed seam; Phase 10C wires the SQL grants lookup so
+// production authorization no longer trusts header-supplied roles.
 //
 // IMPORTANT contract:
-//   - When the supplied pgxpool.Pool is nil, the resolver delegates
-//     to Fallback (typically NewDefaultRoleResolver). This means
-//     environments without a wired RBAC schema still get a safe,
-//     enumerated capability set.
-//   - When the pool is non-nil, the current implementation STILL
-//     falls back to the static resolver (Phase 10B contract: no
-//     real role store yet). The hook exists; Phase 10C swaps in
-//     the SQL lookup.
-//   - Any future SQL error MUST surface as fail-closed: a deny.
+//   - When the pool is nil, the resolver delegates to Fallback
+//     (typically NewDefaultRoleResolver). Dev/test environments
+//     without a wired RBAC schema still get a safe enumerated
+//     capability set.
+//   - When the pool is non-nil, the resolver consults
+//     PgRoleResolver first. If the SQL lookup returns roles those
+//     drive the capability map. Header roles are IGNORED for that
+//     actor.
+//   - When the SQL lookup reports the actor is unknown (no row in
+//     network_action_role_grants):
+//   - RequireSQL=false → fall back to the header-roles static
+//     resolver. This keeps Phase 10B and earlier deployments
+//     working until grants are seeded.
+//   - RequireSQL=true → return ErrPrincipalUnknown. The
+//     HasCapability helper translates this into a deny. This is
+//     the production posture once an operator has finished
+//     seeding the table.
+//   - Any DB error → ErrRBACResolverUnavailable (fail-closed).
 type PgRBACResolver struct {
 	P        *pgxpool.Pool
 	Fallback RBACResolver
+	// SQL is the SQL-backed resolver consulted before Fallback. Held
+	// as RBACResolver (rather than *PgRoleResolver) so tests can
+	// swap in mocks without reaching into private state. Production
+	// wiring uses *PgRoleResolver against the live grants table.
+	SQL RBACResolver
+	// RequireSQL flips the resolver into strict mode: an unknown
+	// actor returns ErrPrincipalUnknown instead of falling back to
+	// the static resolver. Operators flip this to true after seeding
+	// network_action_role_grants. Default: false (Phase 10B parity).
+	RequireSQL bool
 }
 
 // NewPgRBACResolver wires the resolver. If fallback is nil, a
@@ -35,19 +52,61 @@ func NewPgRBACResolver(p *pgxpool.Pool, fallback RBACResolver) *PgRBACResolver {
 	if fallback == nil {
 		fallback = NewDefaultRoleResolver()
 	}
-	return &PgRBACResolver{P: p, Fallback: fallback}
+	r := &PgRBACResolver{P: p, Fallback: fallback}
+	if p != nil {
+		// Auto-wire the SQL resolver. The capability map is the same
+		// static mapping the fallback uses so a role list coming
+		// from the DB resolves to the same capability set the static
+		// resolver would have produced for the same roles.
+		caps := defaultCapabilityMap(fallback)
+		r.SQL = NewPgRoleResolver(p, caps)
+	}
+	return r
 }
 
-// Capabilities implements RBACResolver. Phase 10B contract: ALWAYS
-// delegate to the fallback; the SQL hook is reserved for Phase 10C.
-// This keeps behavior identical to the merged Phase 10A surface
-// while introducing the type the API server will hold long-term.
+// Capabilities implements RBACResolver. The lookup order is:
+//
+//  1. SQL resolver (when wired). Found → those roles drive caps.
+//  2. SQL says ErrPrincipalUnknown:
+//     - RequireSQL=true  → return ErrPrincipalUnknown (deny).
+//     - RequireSQL=false → fall back to Fallback (header roles).
+//  3. SQL says ErrRBACResolverUnavailable → return that (deny).
+//  4. SQL not wired → Fallback.
+//
+// Either branch returns a non-nil error or a possibly-empty slice.
 func (r *PgRBACResolver) Capabilities(ctx context.Context, p Principal) ([]Capability, error) {
 	if r == nil || r.Fallback == nil {
 		return nil, ErrRBACResolverUnavailable
 	}
-	// Phase 10C will replace this body with a SELECT against the
-	// roles + role_capabilities tables, layered on top of the
-	// fallback.
+	if r.SQL != nil {
+		caps, err := r.SQL.Capabilities(ctx, p)
+		if err == nil {
+			return caps, nil
+		}
+		if errors.Is(err, ErrPrincipalUnknown) {
+			if r.RequireSQL {
+				return nil, ErrPrincipalUnknown
+			}
+			// fall through to header-based fallback
+		} else {
+			// Any other error (DB outage, resolver unavailable) is
+			// a hard deny. We do NOT fall through to the static
+			// resolver because that would let an attacker degrade
+			// the DB connection to escalate via headers.
+			return nil, err
+		}
+	}
 	return r.Fallback.Capabilities(ctx, p)
+}
+
+// defaultCapabilityMap extracts a *StaticRoleResolver from an
+// RBACResolver if possible; otherwise returns NewDefaultRoleResolver.
+// This is best-effort: if the caller provides a custom fallback, the
+// SQL resolver still needs a known role→capability mapping, so we
+// fall back to the canonical default.
+func defaultCapabilityMap(fallback RBACResolver) *StaticRoleResolver {
+	if s, ok := fallback.(*StaticRoleResolver); ok && s != nil {
+		return s
+	}
+	return NewDefaultRoleResolver()
 }

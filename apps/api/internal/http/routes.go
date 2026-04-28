@@ -71,6 +71,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/network/actions/toggle", s.handleSafetyToggle)
 	mux.HandleFunc("/api/v1/network/actions/maintenance-windows", s.handleSafetyMaintenanceWindowsDispatch)
 	mux.HandleFunc("/api/v1/network/actions/maintenance-windows/", s.handleSafetyMaintenanceWindowsDispatch)
+
+	// Faz 10C — Destructive runtime lifecycle. NEVER reaches
+	// action.Execute. Every endpoint runs through the pre-gate +
+	// emits the lifecycle audit catalog. Live execution is blocked
+	// by design while DestructiveActionEnabled stays false.
+	mux.HandleFunc("/api/v1/network/actions/destructive/", s.handleDestructiveDispatch)
+	mux.HandleFunc("/api/v1/network/actions/lifecycle/", s.handleActionLifecycle)
 }
 
 // handleReportsRoot, /api/v1/reports kökü — snapshot listesi.
