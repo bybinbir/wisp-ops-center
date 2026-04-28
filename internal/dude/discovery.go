@@ -29,13 +29,21 @@ type RunResult struct {
 
 // Run dials the Dude SSH endpoint, runs the read-only discovery
 // commands, parses their output and classifies each host.
-func Run(ctx context.Context, cfg Config, log *slog.Logger, store wispssh.KnownHostsStore) RunResult {
-	res := RunResult{
+//
+// IMPORTANT (Phase 8 hotfix v8.4.0): the return value is a NAMED
+// return so the deferred FinishedAt + Stats.Tally mutations are
+// observed by the caller. With a non-named return, `return res`
+// copies the result into the caller's slot before the deferred
+// closure runs, and Stats stays zero-valued (caused
+// discovery_runs.device_count=0 even when 893 devices were upserted).
+func Run(ctx context.Context, cfg Config, log *slog.Logger, store wispssh.KnownHostsStore) (res RunResult) {
+	res = RunResult{
 		CorrelationID: NewCorrelationID(),
 		StartedAt:     time.Now().UTC(),
 	}
 	defer func() {
 		res.FinishedAt = time.Now().UTC()
+		res.Stats = DiscoveryStats{}
 		res.Stats.Tally(res.Devices)
 	}()
 

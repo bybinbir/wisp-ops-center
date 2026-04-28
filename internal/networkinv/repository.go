@@ -41,15 +41,35 @@ RETURNING id, source, correlation_id, started_at, finished_at, status,
 	return scanRun(row)
 }
 
-// FinalizeRun updates the run with terminal state + counters.
+// ComputeRunStatus is the single source of truth for the run status
+// invariant (Phase 8 hotfix v8.4.0):
+//
+//   - success=true AND errorCode=="" -> "succeeded"
+//   - errorCode=="panic_recovered"   -> "failed" (never partial)
+//   - some devices observed          -> "partial"
+//   - nothing observed               -> "failed"
+//
+// A non-empty errorCode MUST NEVER produce "succeeded".
+func ComputeRunStatus(success bool, errorCode string, deviceCount int) string {
+	if success && errorCode == "" {
+		return "succeeded"
+	}
+	if errorCode == "panic_recovered" {
+		return "failed"
+	}
+	if deviceCount > 0 {
+		return "partial"
+	}
+	return "failed"
+}
+
+// FinalizeRun updates the run with terminal state + counters using
+// the ComputeRunStatus invariant.
 func (r *Repository) FinalizeRun(ctx context.Context, runID string, res dude.RunResult) error {
-	status := "succeeded"
-	if !res.Success {
-		if len(res.Devices) > 0 {
-			status = "partial"
-		} else {
-			status = "failed"
-		}
+	status := ComputeRunStatus(res.Success, res.ErrorCode, len(res.Devices))
+	cmds := res.CommandsRun
+	if cmds == nil {
+		cmds = []string{}
 	}
 	_, err := r.P.Exec(ctx, `
 UPDATE discovery_runs
@@ -66,7 +86,7 @@ WHERE id = $1`,
 		res.Stats.Total, res.Stats.APs, res.Stats.CPEs, res.Stats.Bridges,
 		res.Stats.BackhaulLinks, res.Stats.Routers, res.Stats.Switches,
 		res.Stats.Unknown, res.Stats.LowConfidence,
-		res.ErrorCode, res.Error, res.CommandsRun)
+		res.ErrorCode, res.Error, cmds)
 	return err
 }
 
@@ -118,126 +138,192 @@ LIMIT 1`)
 }
 
 // ----------------------------------------------------------------------------
-// network_devices
+// network_devices upsert
 // ----------------------------------------------------------------------------
 
+// UpsertStats reports per-run insert/update/skip counters from
+// UpsertDevices. Useful for run finalize + audit metadata.
+type UpsertStats struct {
+	Inserted int
+	Updated  int
+	Skipped  int
+}
+
 // UpsertDevices applies a discovery result to network_devices using
-// (source,mac), (source,host,name) and (source,name) match keys in
-// that priority. Returns the per-device persisted IDs in the same
-// order as the input slice.
+// per-device dispatch on the strongest stable identity:
 //
-// Evidence rows for run_id are also written if non-empty.
-func (r *Repository) UpsertDevices(ctx context.Context, runID string, devs []dude.DiscoveredDevice) ([]string, error) {
+//  1. (source, mac)              when MAC present
+//  2. (source, host, name)       when MAC empty and host+name present
+//  3. (source, name) name-only   when MAC and host empty
+//  4. otherwise                  skipped (no stable identity)
+//
+// Each branch uses an ON CONFLICT clause whose target+predicate match
+// the corresponding partial unique index in migration 000008 so
+// re-running the same dataset is idempotent and never raises 23505.
+//
+// Returns:
+//   - ids[i]: persisted device id; "" when device i was skipped
+//   - stats:  insert/update/skip counters
+func (r *Repository) UpsertDevices(ctx context.Context, runID string, devs []dude.DiscoveredDevice) ([]string, UpsertStats, error) {
 	ids := make([]string, len(devs))
+	var stats UpsertStats
 	if len(devs) == 0 {
-		return ids, nil
+		return ids, stats, nil
 	}
 
 	tx, err := r.P.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	for i, d := range devs {
-		raw, _ := json.Marshal(d.Raw)
 		host := strings.TrimSpace(d.IP)
 		name := strings.TrimSpace(d.Name)
 		mac := strings.ToUpper(strings.TrimSpace(d.MAC))
-		category := string(d.Classification.Category)
-		if category == "" {
-			category = string(dude.CategoryUnknown)
+
+		if mac == "" && host == "" && name == "" {
+			stats.Skipped++
+			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(d.Status))
-		if status == "" {
-			status = "unknown"
-		}
-		if status != "up" && status != "down" && status != "partial" && status != "unknown" {
-			status = "unknown"
+		// host without name is not an identifying combination for the
+		// (source,host,name) index; only name-only branch covers that
+		// case via name. If even name is empty, we skip too.
+		if mac == "" && name == "" {
+			stats.Skipped++
+			continue
 		}
 
-		// Find existing row (mac > host+name > name)
-		var existingID string
-		findErr := tx.QueryRow(ctx, `
-SELECT id FROM network_devices
-WHERE source = 'mikrotik_dude'
-  AND ( ($1::text <> '' AND mac = $1)
-     OR ($2::text <> '' AND host = $2::inet AND name = $3)
-     OR ($1::text = '' AND $2::text = '' AND name = $3)
-      )
-ORDER BY updated_at DESC
-LIMIT 1`, mac, nullIfEmpty(host), name).Scan(&existingID)
-
-		var id string
-		if findErr == nil && existingID != "" {
-			// Update.
-			err := tx.QueryRow(ctx, `
-UPDATE network_devices
-SET host = COALESCE(NULLIF($1,'')::inet, host),
-    name = CASE WHEN $2 <> '' THEN $2 ELSE name END,
-    mac = CASE WHEN $3 <> '' THEN $3 ELSE mac END,
-    model = CASE WHEN $4 <> '' THEN $4 ELSE model END,
-    os_version = CASE WHEN $5 <> '' THEN $5 ELSE os_version END,
-    identity = CASE WHEN $6 <> '' THEN $6 ELSE identity END,
-    device_type = CASE WHEN $7 <> '' THEN $7 ELSE device_type END,
-    category = $8,
-    confidence = $9,
-    status = $10,
-    raw_metadata = $11::jsonb,
-    last_seen_at = $12,
-    updated_at = now()
-WHERE id = $13
-RETURNING id`,
-				host, name, mac, d.Model, d.OSVersion, d.Identity, d.Type,
-				category, d.Classification.Confidence, status, string(raw),
-				d.LastSeen, existingID).Scan(&id)
-			if err != nil {
-				return nil, fmt.Errorf("update device %d: %w", i, err)
-			}
-		} else if errors.Is(findErr, pgx.ErrNoRows) || existingID == "" {
-			// Insert.
-			err := tx.QueryRow(ctx, `
-INSERT INTO network_devices
-(source, host, name, mac, model, os_version, identity, device_type,
- category, confidence, status, last_seen_at, raw_metadata)
-VALUES ('mikrotik_dude', NULLIF($1,'')::inet, $2, NULLIF($3,''), NULLIF($4,''),
-        NULLIF($5,''), NULLIF($6,''), NULLIF($7,''),
-        $8, $9, $10, $11, $12::jsonb)
-RETURNING id`,
-				host, name, mac, d.Model, d.OSVersion, d.Identity, d.Type,
-				category, d.Classification.Confidence, status, d.LastSeen, string(raw)).Scan(&id)
-			if err != nil {
-				return nil, fmt.Errorf("insert device %d: %w", i, err)
-			}
-		} else {
-			return nil, fmt.Errorf("lookup device %d: %w", i, findErr)
+		id, inserted, err := upsertOneDevice(ctx, tx, d, host, name, mac)
+		if err != nil {
+			return nil, stats, fmt.Errorf("upsert device %d: %w", i, err)
 		}
-
 		ids[i] = id
+		if inserted {
+			stats.Inserted++
+		} else {
+			stats.Updated++
+		}
 
 		if runID != "" {
-			// Refresh evidence for this device + run.
-			_, err := tx.Exec(ctx, `
-DELETE FROM device_category_evidence WHERE device_id = $1 AND run_id = $2`,
-				id, runID)
-			if err != nil {
-				return nil, fmt.Errorf("clear evidence %d: %w", i, err)
-			}
-			for _, ev := range d.Classification.Evidences {
-				_, err := tx.Exec(ctx, `
-INSERT INTO device_category_evidence
-(device_id, run_id, heuristic, category, weight, reason)
-VALUES ($1, $2, $3, $4, $5, $6)`,
-					id, runID, ev.Heuristic, category, ev.Weight, ev.Reason)
-				if err != nil {
-					return nil, fmt.Errorf("insert evidence %d: %w", i, err)
-				}
+			if err := refreshEvidence(ctx, tx, id, runID, d); err != nil {
+				return nil, stats, fmt.Errorf("evidence device %d: %w", i, err)
 			}
 		}
 	}
 
-	return ids, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, stats, err
+	}
+	return ids, stats, nil
 }
+
+func upsertOneDevice(ctx context.Context, tx pgx.Tx, d dude.DiscoveredDevice, host, name, mac string) (string, bool, error) {
+	raw, _ := json.Marshal(d.Raw)
+	category := string(d.Classification.Category)
+	if category == "" {
+		category = string(dude.CategoryUnknown)
+	}
+	status := strings.ToLower(strings.TrimSpace(d.Status))
+	switch status {
+	case "up", "down", "partial", "unknown":
+	default:
+		status = "unknown"
+	}
+
+	var sqlText string
+	switch {
+	case mac != "":
+		sqlText = sqlUpsertDeviceByMAC
+	case host != "" && name != "":
+		sqlText = sqlUpsertDeviceByHostName
+	case name != "":
+		sqlText = sqlUpsertDeviceByName
+	default:
+		// Caller already filters this case; defensive only.
+		return "", false, errors.New("no stable identity")
+	}
+
+	var id string
+	var inserted bool
+	err := tx.QueryRow(ctx, sqlText,
+		nullIfEmpty(host),           // $1 host
+		name,                        // $2 name
+		nullIfEmpty(mac),            // $3 mac
+		nullIfEmpty(d.Model),        // $4 model
+		nullIfEmpty(d.OSVersion),    // $5 os_version
+		nullIfEmpty(d.Identity),     // $6 identity
+		nullIfEmpty(d.Type),         // $7 device_type
+		category,                    // $8 category
+		d.Classification.Confidence, // $9 confidence
+		status,                      // $10 status
+		d.LastSeen,                  // $11 last_seen_at
+		string(raw),                 // $12 raw_metadata
+	).Scan(&id, &inserted)
+	return id, inserted, err
+}
+
+// All three INSERTs share the same column list and parameter order;
+// they differ only in the ON CONFLICT target+predicate to match the
+// three partial unique indexes from migration 000008.
+
+const sqlUpsertDeviceCommonValues = `
+INSERT INTO network_devices
+(source, host, name, mac, model, os_version, identity, device_type,
+ category, confidence, status, last_seen_at, raw_metadata)
+VALUES ('mikrotik_dude', $1::inet, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12::jsonb)
+`
+
+const sqlUpsertDeviceCommonUpdate = `
+DO UPDATE SET
+  host = COALESCE(EXCLUDED.host, network_devices.host),
+  name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE network_devices.name END,
+  mac = COALESCE(EXCLUDED.mac, network_devices.mac),
+  model = COALESCE(EXCLUDED.model, network_devices.model),
+  os_version = COALESCE(EXCLUDED.os_version, network_devices.os_version),
+  identity = COALESCE(EXCLUDED.identity, network_devices.identity),
+  device_type = COALESCE(EXCLUDED.device_type, network_devices.device_type),
+  category = EXCLUDED.category,
+  confidence = EXCLUDED.confidence,
+  status = EXCLUDED.status,
+  raw_metadata = EXCLUDED.raw_metadata,
+  last_seen_at = EXCLUDED.last_seen_at,
+  updated_at = now()
+RETURNING id, (xmax = 0) AS inserted
+`
+
+var (
+	sqlUpsertDeviceByMAC      = sqlUpsertDeviceCommonValues + `ON CONFLICT (source, mac) WHERE mac IS NOT NULL ` + sqlUpsertDeviceCommonUpdate
+	sqlUpsertDeviceByHostName = sqlUpsertDeviceCommonValues + `ON CONFLICT (source, host, name) WHERE host IS NOT NULL ` + sqlUpsertDeviceCommonUpdate
+	sqlUpsertDeviceByName     = sqlUpsertDeviceCommonValues + `ON CONFLICT (source, name) WHERE host IS NULL AND mac IS NULL AND name <> '' ` + sqlUpsertDeviceCommonUpdate
+)
+
+func refreshEvidence(ctx context.Context, tx pgx.Tx, deviceID, runID string, d dude.DiscoveredDevice) error {
+	if _, err := tx.Exec(ctx, `
+DELETE FROM device_category_evidence WHERE device_id = $1 AND run_id = $2`,
+		deviceID, runID); err != nil {
+		return err
+	}
+	category := string(d.Classification.Category)
+	if category == "" {
+		category = string(dude.CategoryUnknown)
+	}
+	for _, ev := range d.Classification.Evidences {
+		if _, err := tx.Exec(ctx, `
+INSERT INTO device_category_evidence
+(device_id, run_id, heuristic, category, weight, reason)
+VALUES ($1, $2, $3, $4, $5, $6)`,
+			deviceID, runID, ev.Heuristic, category, ev.Weight, ev.Reason); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ----------------------------------------------------------------------------
+// network_devices read
+// ----------------------------------------------------------------------------
 
 // ListDevices returns a filtered slice.
 func (r *Repository) ListDevices(ctx context.Context, f Filter) ([]Device, error) {

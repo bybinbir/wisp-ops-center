@@ -195,11 +195,18 @@ func (s *Server) runDudeDiscoveryAsync(runID, correlationID string, cfg dude.Con
 	res := dude.Run(ctx, cfg, s.log, s.dudeKnownHostsStore())
 	res.CorrelationID = correlationID
 
-	if _, err := s.netInv.UpsertDevices(ctx, runID, res.Devices); err != nil {
+	_, persistStats, err := s.netInv.UpsertDevices(ctx, runID, res.Devices)
+	if err != nil {
 		s.log.Warn("dude_upsert_failed", "err", err, "correlation_id", correlationID)
-		// Don't override an existing error; concatenate.
+		// HOTFIX v8.4.0 — run state consistency: persist failure must
+		// flip success=false so FinalizeRun marks the row failed/partial
+		// and the audit event reports failure. success+error_code can
+		// never both be true.
+		res.Success = false
 		if res.Error == "" {
 			res.Error = "persist_failed: " + dude.SanitizeMessage(err.Error())
+		}
+		if res.ErrorCode == "" {
 			res.ErrorCode = "persist_failed"
 		}
 	}
@@ -209,7 +216,7 @@ func (s *Server) runDudeDiscoveryAsync(runID, correlationID string, cfg dude.Con
 	}
 
 	finishOutcome := audit.OutcomeFailure
-	if res.Success {
+	if res.Success && res.ErrorCode == "" {
 		finishOutcome = audit.OutcomeSuccess
 	}
 	s.audit(ctx, audit.Entry{
@@ -221,6 +228,9 @@ func (s *Server) runDudeDiscoveryAsync(runID, correlationID string, cfg dude.Con
 			"run_id":         runID,
 			"correlation_id": correlationID,
 			"device_count":   res.Stats.Total,
+			"inserted_count": persistStats.Inserted,
+			"updated_count":  persistStats.Updated,
+			"skipped_count":  persistStats.Skipped,
 			"error_code":     res.ErrorCode,
 		},
 	})
