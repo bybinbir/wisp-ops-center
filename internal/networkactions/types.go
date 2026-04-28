@@ -106,3 +106,101 @@ type SourceCommand struct {
 	Records  int    `json:"records"`
 	ElapsedM int64  `json:"elapsed_ms"`
 }
+
+// ----------------------------------------------------------------------------
+// Phase 9 v2 — additional read-only result shapes.
+// ----------------------------------------------------------------------------
+
+// APClientTestResult is the structured payload that
+// APClientTestAction stores under ActionRun.Result. Focuses on
+// AP-side client health (signal/ccq/rate distribution) without
+// touching configuration. Reuses WirelessSnapshot for the per-
+// interface header.
+type APClientTestResult struct {
+	DeviceIdentity string             `json:"device_identity,omitempty"`
+	MenuSource     string             `json:"menu_source,omitempty"` // "wireless"/"wifi"/"wifiwave2"/"none"
+	Interfaces     []WirelessSnapshot `json:"interfaces"`
+	ClientCount    int                `json:"client_count"`
+	WeakClients    []ClientStat       `json:"weak_clients"`
+	LowCCQClients  []ClientStat       `json:"low_ccq_clients"`
+	AvgSignal      *int               `json:"avg_signal,omitempty"`
+	WorstSignal    *int               `json:"worst_signal,omitempty"`
+	AvgCCQ         *int               `json:"avg_ccq,omitempty"`
+	Warnings       []string           `json:"warnings"`
+	Evidence       []string           `json:"evidence"`
+	Skipped        bool               `json:"skipped,omitempty"`
+	SkippedReason  string             `json:"skipped_reason,omitempty"`
+}
+
+// ClientStat is a per-client read-only summary. The MAC field is
+// truncated (last byte masked) so the result jsonb does not carry
+// fully-resolvable customer device identifiers, while still letting
+// the operator scan for repeated bad MAC prefixes. SSH password /
+// key material is never present in source data; SanitizeAttrs
+// covers the rest.
+type ClientStat struct {
+	MACPrefix     string `json:"mac_prefix,omitempty"`
+	InterfaceName string `json:"interface_name,omitempty"`
+	Signal        *int   `json:"signal,omitempty"`
+	CCQ           *int   `json:"ccq,omitempty"`
+	TxRateMbps    *int   `json:"tx_rate_mbps,omitempty"`
+	RxRateMbps    *int   `json:"rx_rate_mbps,omitempty"`
+	UptimeSeconds int64  `json:"uptime_seconds,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// LinkSignalTestResult is the structured payload for
+// LinkSignalTestAction. Designed for point-to-point links where the
+// AP-side typically has 1-2 registered peers.
+type LinkSignalTestResult struct {
+	DeviceIdentity   string   `json:"device_identity,omitempty"`
+	MenuSource       string   `json:"menu_source,omitempty"`
+	LocalInterface   string   `json:"local_interface,omitempty"`
+	LinkDetected     bool     `json:"link_detected"`
+	RemoteIdentifier string   `json:"remote_identifier,omitempty"`
+	Signal           *int     `json:"signal,omitempty"`
+	TxRateMbps       *int     `json:"tx_rate_mbps,omitempty"`
+	RxRateMbps       *int     `json:"rx_rate_mbps,omitempty"`
+	CCQ              *int     `json:"ccq,omitempty"`
+	HealthStatus     string   `json:"health_status"` // healthy|warning|critical|unknown
+	Warnings         []string `json:"warnings"`
+	Evidence         []string `json:"evidence"`
+	Skipped          bool     `json:"skipped,omitempty"`
+	SkippedReason    string   `json:"skipped_reason,omitempty"`
+}
+
+// BridgeHealthResult is the structured payload for
+// BridgeHealthCheckAction. Focuses on bridge + bridge port read-only
+// state.
+type BridgeHealthResult struct {
+	DeviceIdentity   string       `json:"device_identity,omitempty"`
+	BridgeCount      int          `json:"bridge_count"`
+	BridgePortsCount int          `json:"bridge_ports_count"`
+	Bridges          []BridgeStat `json:"bridges"`
+	DownPorts        []BridgePort `json:"down_ports"`
+	DisabledPorts    []BridgePort `json:"disabled_ports"`
+	RunningSummary   string       `json:"running_summary,omitempty"`
+	Warnings         []string     `json:"warnings"`
+	Evidence         []string     `json:"evidence"`
+	Skipped          bool         `json:"skipped,omitempty"`
+	SkippedReason    string       `json:"skipped_reason,omitempty"`
+}
+
+// BridgeStat is a per-bridge read-only header.
+type BridgeStat struct {
+	Name      string `json:"name"`
+	Running   *bool  `json:"running,omitempty"`
+	Disabled  *bool  `json:"disabled,omitempty"`
+	PortCount int    `json:"port_count"`
+}
+
+// BridgePort is a per-port read-only entry. We deliberately do NOT
+// include the MAC address of attached hosts (that would require the
+// bridge host table, which is excluded from the allowlist).
+type BridgePort struct {
+	Bridge        string `json:"bridge"`
+	InterfaceName string `json:"interface_name"`
+	Running       *bool  `json:"running,omitempty"`
+	Disabled      *bool  `json:"disabled,omitempty"`
+	Status        string `json:"status,omitempty"`
+}

@@ -36,6 +36,16 @@ var readOnlyCommands = map[string]struct{}{
 	"/interface/wifiwave2/print/detail":                    {},
 	"/interface/wifiwave2/registration-table/print":        {},
 	"/interface/wifiwave2/registration-table/print/detail": {},
+
+	// Phase 9 v2 — bridge_health_check.
+	// Bridge + bridge port read-only views. The bridge "host" table
+	// (MAC learning) is intentionally NOT included to keep the
+	// surface area narrow and avoid leaking customer MACs through
+	// the action result jsonb.
+	"/interface/bridge/print":             {},
+	"/interface/bridge/print/detail":      {},
+	"/interface/bridge/port/print":        {},
+	"/interface/bridge/port/print/detail": {},
 }
 
 // denyMutationSegments is the segment-level veto list. Even a path

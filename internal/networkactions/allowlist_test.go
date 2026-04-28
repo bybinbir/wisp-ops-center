@@ -104,3 +104,68 @@ func TestEnsureCommandAllowed_RejectsEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestEnsureCommandAllowed_AcceptsBridgeReadOnly covers the Phase
+// 9 v2 additions: bridge + bridge port detail.
+func TestEnsureCommandAllowed_AcceptsBridgeReadOnly(t *testing.T) {
+	cases := []string{
+		"/interface/bridge/print",
+		"/interface/bridge/print/detail",
+		"/interface/bridge/port/print",
+		"/interface/bridge/port/print/detail",
+	}
+	for _, c := range cases {
+		if err := EnsureCommandAllowed(c); err != nil {
+			t.Errorf("%q rejected: %v", c, err)
+		}
+	}
+}
+
+// TestEnsureCommandAllowed_BlocksBridgeMutation specifically rejects
+// bridge mutation paths even though bridge is now an allowlisted
+// namespace.
+func TestEnsureCommandAllowed_BlocksBridgeMutation(t *testing.T) {
+	blocked := []string{
+		"/interface/bridge/add",
+		"/interface/bridge/remove",
+		"/interface/bridge/set",
+		"/interface/bridge/disable",
+		"/interface/bridge/enable",
+		"/interface/bridge/port/add",
+		"/interface/bridge/port/remove",
+		"/interface/bridge/port/set",
+		// Host table is intentionally not allowlisted; even read
+		// path /interface/bridge/host/print must be rejected.
+		"/interface/bridge/host/print",
+	}
+	for _, c := range blocked {
+		err := EnsureCommandAllowed(c)
+		if !errors.Is(err, ErrDisallowedCommand) {
+			t.Errorf("bridge mutation %q must be blocked, got %v", c, err)
+		}
+	}
+}
+
+// TestEnsureCommandAllowed_NoBandwidthTestAnywhere is the single
+// integration assertion that proves the allowlist + denylist will
+// reject every variant of bandwidth-test the action runner could
+// possibly try to emit. If a future action mistakenly threads a
+// bandwidth-test command into Exec, this test fails before any
+// SSH dial happens.
+func TestEnsureCommandAllowed_NoBandwidthTestAnywhere(t *testing.T) {
+	cases := []string{
+		"/tool/bandwidth-test",
+		"/tool/bandwidth-server",
+		"/tool/bandwidth-server/set",
+		"/tool/bandwidth-test address=1.2.3.4",
+		"/tool/torch",
+		"/tool/sniffer/start",
+		"/interface/wireless/scan",
+		"/interface/wireless/snooper",
+	}
+	for _, c := range cases {
+		if err := EnsureCommandAllowed(c); !errors.Is(err, ErrDisallowedCommand) {
+			t.Errorf("destructive cmd %q must be blocked, got %v", c, err)
+		}
+	}
+}
