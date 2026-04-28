@@ -3,15 +3,14 @@
 ## Baseline
 
 - **PR:** https://github.com/bybinbir/wisp-ops-center/pull/5
-- **Head:** `35fbe6ab5a4ccaf64b62716ca0e5c6ff16c4fc84` *(docs(phase-8): refresh operator smoke result with real lab evidence)*
-- **Commit zinciri:** `36a27a2` → `e7915d6` → `6882960` → `35fbe6a` — HEAD ile uyumlu.
-- **Date:** 2026-04-28 (live MikroTik smoke turu)
-- **Environment:** Windows 11 lab makinesi. PostgreSQL 16.13 lokal (cluster: `C:\Program Files\PostgreSQL\16\data`, lokal `trust` auth, port 5432). Go 1.26.0, Node + pnpm + npm. Operatör `MIKROTIK_DUDE_PASSWORD` değerini lokal `.env`'e elle koydu; live SSH dial denendi.
-- **Operator:** Otonom akış (kullanıcı: malii / marskocas@gmail.com), prompt: WISP-P8-LIVE-DUDE-SMOKE-MERGE v8.2.1.
+- **Head:** `54385f2586cadd2626498876170ca3f5529aaaec` *(docs(phase-8): live dude smoke FAIL — device-side SSH unreachable)*
+- **Commit zinciri:** `36a27a2` → `e7915d6` → `6882960` → `35fbe6a` → `54385f2` — HEAD ile uyumlu.
+- **Date:** 2026-04-28 (3. tur: SSH recovery sonrası live smoke)
+- **Environment:** Windows 11 lab makinesi. PostgreSQL 16.13 lokal. Go 1.26.0. Operatör cihaz tarafında SSH service düzeltmesi yaptı + `.env`'deki duplicate `MIKROTIK_DUDE_PASSWORD` placeholder satırı temizlendi. Live SSH dial başarılı, discovery 893 cihaz çekti.
+- **Operator:** Otonom akış (kullanıcı: malii / marskocas@gmail.com), prompt: WISP-P8-DUDE-SSH-RECOVERY-SMOKE-MERGE v8.3.0.
 - **PR mergeable / mergeStateStatus:** `MERGEABLE` / `CLEAN`
-- **Reviewer (engineering) raporu:** `docs/PHASE_008_PR5_REVIEW_SMOKE_RESULT.md` — READY *(engineering)*.
 
-> Bu doküman gerçek lab kanıtlarıyla güncellendi. Engineering, migration, API+DB integration ve config validation tamamen yeşil. Live MikroTik smoke FAIL: hedef cihaz SSH banner göndermiyor (handshake EOF). Sahte başarı kaydı yok; PR merge **edilmedi**.
+> Bu tur engineering + PG + SSH recovery + test-connection + 1. discovery run tamamen PASS. Ancak ikinci discovery run'da **dedupe/upsert bug** ortaya çıktı (`SQLSTATE 23505` unique constraint violation) ve **discovery_runs counter güncelleme bug**'ı tespit edildi. Conditional merge gate'i `dedupe/upsert re-run PASS` sağlanmadığı için PR merge **edilmedi**. İki PR-içi defect için ayrı hotfix commit'i şart.
 
 ## Gate Tests
 
@@ -58,36 +57,44 @@ API lokal binary olarak başlatıldı; tüm Phase 8 endpoint'leri DB ile gerçek
 | `GET /api/v1/audit-logs` | PASS | HTTP 200; `{data:[]}` (henüz canlı çağrı olmadı). |
 | Auth middleware | PASS | Token'sız `/api/v1/network/...` çağrıları HTTP 401 `unauthorized` döner. Token ile aynı çağrılar 200. |
 
-## MikroTik Dude Read-Only Smoke (Live Lab Attempt)
+## MikroTik Dude Read-Only Smoke (Live Lab — 3. Tur)
 
-Operatör `MIKROTIK_DUDE_PASSWORD` değerini lokal `.env`'e elle koydu. API canlı SSH dial denedi; **hedef cihaz SSH banner göndermeden bağlantıyı kapattı** (handshake EOF). Cihaz tarafında SSH server problemi (devre dışı / brute-force koruma / port forwarding farklı servise) — kod tarafı temiz davrandı ve sanitize hata raporladı.
+Operatör cihaz tarafında SSH service düzeltmesi yaptı (cross-check: `SSH-2.0-ROSSSH` banner artık geliyor). `.env` duplicate password satırı temizlendi. API canlı SSH dial başarılı, identity döndü, discovery 893 cihaz çekti. Ancak ikinci run dedupe/upsert kırık çıktı.
 
 | Scenario | Result | Evidence |
 |---|---:|---|
-| `POST /test-connection` HTTP cevabı | PASS (HTTP layer) | HTTP 200, JSON `{reachable:false, error_code:"unreachable", error:"dude: device_unreachable", duration_ms:0, host:"194.15.45.62", started_at:"..."}`. Sanitize: parola/secret yok, sadece host (zaten kullanıcı tarafından bildirilen). |
-| `POST /test-connection` reachable=true | **FAIL — SSH HANDSHAKE EOF** | API log: `dude_dial_begin host=194.15.45.62 policy=trust_on_first_use` → `dude_handshake_failed err="ssh: handshake failed: EOF"` (94ms). Manual cross-check: TCP/22 bağlanıyor (TcpTestSucceeded=True, RTT 45ms ICMP) ama 2sn beklendikten sonra cihaz hiç SSH banner göndermiyor. Hedef cihaz SSH server'ı yanıt vermiyor. |
-| `POST /run` discovery | **BLOCKED — prerequisite fail** | test-connection reachable=false olduğu için orchestrator çağırılmadı (operatör akışı, prerequisite başarısız). |
-| Terminal state success | **N/A** | Discovery run başlatılmadı. |
-| Discovered device count | **N/A — BLOCKED** | Live cihaz envanteri çekilemedi; hayali sayı uydurulmadı. |
-| Category distribution | **N/A — BLOCKED** | Aynı sebep. |
-| AP / CPE / BackhaulLink / Bridge / Router / Switch / Unknown count | **N/A — BLOCKED** | Aynı sebep. |
-| Low confidence count / Unknown count | **N/A — BLOCKED** | Aynı sebep. |
-| `unknown=true` / `low_confidence=true` filtre | PASS (parametrik/HTTP) | Endpoint+filter HTTP 200 döndü, summary boş (önceki turdan kanıtlı). Live cihaz olmadığı için sonuç semantiği doğrulanamadı. |
-| `audit_logs` `test_connection` event | PASS | DB query: 1 satır, `action=network.dude.test_connection`, `subject=194.15.45.62`, `outcome=failure`, `actor=system`, `metadata={"error_code":"unreachable","duration_ms":0}`. Sanitize: parola/secret yok. |
-| `audit_logs` `discovery_run_started/finished` | **N/A — BLOCKED** | Discovery run yapılmadı; bu event'ler beklenmedi. |
-| `network_devices.raw_metadata` redaction | **N/A — BLOCKED** | Live cihaz yok. Statik kanıt: `internal/dude/sanitize.go` testleri (`internal/dude/sanitize_test.go`) yeşil. |
-| Dedupe/upsert (mac > host+name > name) | **N/A — BLOCKED (in-memory PASS)** | `dude.dedupeDevices` `TestDedupe_MACWinsOverIP` PASS; DB tarafında `uq_netdev_source_mac` partial unique index doğrulandı. Live ikinci run yapılmadı (test-connection fail). |
-| Secret leakage check | PASS | `.smoke_api.log` `password|secret|token|fingerprint|MIKROTIK_DUDE_PASSWORD|<username>` aramasında 0 hit. audit_logs metadata sadece `error_code` + `duration_ms` (parola/host_key yok). `.env` `.gitignore`'da (line 20) — `git check-ignore -v .env` doğruladı. Bu dökümanda hiçbir gerçek şifre/host fingerprint yok. |
-| Cihaz tarafı tanı (sanitize) | INFO | TCP/22 erişilebilir; ICMP echo cevap yok (firewall — MikroTik için tipik). SSH banner alınmıyor (2sn bekleme sonrası `NO_BANNER_RECEIVED`). Olası nedenler: (1) RouterOS `/ip service` SSH disabled, (2) SSH `allowed-addresses` listesi bizim IP'yi reddediyor, (3) brute-force/Drop blocker kuralı bizi banlıyor, (4) TCP/22 farklı bir cihaza/servise port-forward. Bu PR'ın kodu değil, cihaz konfigürasyon problemi. |
+| SSH banner cross-check | PASS | `Test-NetConnection 194.15.45.62:22` → `TcpTestSucceeded=True`. TCP banner probe → `SSH-2.0-ROSSSH`. Cihaz tarafı SSH service operatör tarafından düzeltildi. |
+| `.env` duplicate password temizliği | PASS | `MIKROTIK_DUDE_PASSWORD=` satır sayısı 1; 6 MikroTik anahtarı dolu; placeholder satırı silindi. Değer terminale basılmadı. |
+| `POST /test-connection` reachable=true | PASS | HTTP 200, JSON `{reachable:true, identity:"***DUDE-YENI", duration_ms:0, host:"194.15.45.62", started_at:"..."}` (0.66s). API log: `dude_dial_begin` → `dude_dial_ok`. Identity sanitize ile maskelenmiş (`***`). |
+| `POST /run` (1. run) HTTP 202 | PASS | HTTP 202 Accepted, `{correlation_id:"dude-400ccbe6b5ef16bb", run_id:"403a4aab-1ff2-47ff-9155-a05dc37a5bff", status:"running"}`. Async kabul edildi. |
+| 1. run terminal state | PASS (dikkat: counter bug) | `GET /runs` → `status:"succeeded"`, started 12:14:09 → finished 12:14:10 (1.26s), `commands_run:["/dude/device/print/detail","/system/identity/print"]`, `error_code:""`. **API'nin `device_count:0` döndürmesi BUG** — DB'de 893 cihaz upsert edildi (aşağıda). |
+| `GET /devices` | PASS | HTTP 200, 893 cihaz döndü; örnek: `name="400" category=Unknown confidence=0`, `name="300-OREN" category=Unknown confidence=0`, `name="<...>" category=Router confidence=>0`. |
+| `GET /devices?unknown=true` | PASS | Unknown kategorisindeki cihazlar döndü (subset of 893). Filter parametresi çalışıyor. |
+| `GET /devices?low_confidence=true` | PASS | confidence<50 olan cihazlar döndü (893'ün hepsi karşılıyor). Filter parametresi çalışıyor. |
+| **2. run (dedupe test)** | **FAIL — DEFECT** | HTTP 202 `{run_id:"e57f0a05-..."}`, status terminal `succeeded` ama `error_code:"persist_failed"`, `error_message:"persist_failed: insert device 0: ERROR: duplicate key value violates unique constraint \"uq_netdev_source_name_when_no_id\" (SQLSTATE 23505)"`. **UpsertDevices'ta name-only cihazlar için `ON CONFLICT (source, name) WHERE host IS NULL AND mac IS NULL AND name <> '' DO UPDATE` kuralı yok**; düz INSERT → 23505 unique violation → ilk cihazda transaction patladı. |
+| `audit_logs` `network.dude.test_connection` (success) | PASS | `outcome=success`, `metadata={"error_code":"","duration_ms":0}`. Önceki turun `failure` event'i de mevcut (önceki SSH EOF kanıtı). |
+| `audit_logs` `network.dude.run.start` (×2) | PASS | İki ayrı run için iki ayrı event; `outcome=success`, `metadata={"run_id":"<uuid>","correlation_id":"dude-..."}`. |
+| `audit_logs` `network.dude.run.finish` (×2) | PASS | İki finish event; 1. run `error_code=""`, 2. run `error_code="persist_failed"` — `device_count` her ikisinde 0 (counter bug ile aynı kaynaklı). |
+| `network_devices.raw_metadata` redaction | PASS | DB query: `raw_metadata::text ~* '(password\|secret\|community\|key\|bearer\|fingerprint)'` AND not redacted → 0 hit. raw_metadata sadece `{name:"..."}` alanı içeriyor (Dude detail komutunun döndüğü minimum bilgi). |
+| Dedupe/upsert davranışı | **FAIL** | İkinci run aynı 893 cihazı upsert etmeye çalıştı; ilk INSERT'te 23505 unique violation → transaction abort. **Üç partial unique index (mac / host+name / name) için kod tarafında uygun ON CONFLICT clause yok.** |
+| Secret leakage check | PASS | `.smoke_api.log` (21 satır) `password\|secret\|fingerprint\|MIKROTIK_DUDE_PASSWORD\|<username>` aramasında 0 hit. audit_logs metadata sadece `error_code` + `duration_ms` + `run_id` + `correlation_id`. `.env` `.gitignore`'da. Bu raporda hiçbir gerçek şifre/host_key/identity-tam-değer geçmiyor. |
+| `discovery_runs` summary counter | **BUG** | 1. run gerçek 893 cihaz upsert ama API'de `device_count=0`. `FinalizeRun` veya orchestrator counter aggregation eksik. |
+| Tüm cihazlar Unknown + confidence=0 | INFO | Dude `/dude/device/print/detail` sadece `name` alanı döndürüyor (host/mac/model/os_version yok). Classifier minimum bilgi ile sınıflandırıyor → çoğu Unknown + confidence=0 (1 Router istisna). Bu dataset davranışı; algoritma değil. |
 
 ## Inventory Summary
 
-Live discovery yapılmadı; SSH handshake EOF nedeniyle test-connection fail (cihaz tarafı).
+Live discovery 893 cihaz çekti. (DB sayımı, /devices endpoint sayımı ile eşleşiyor.)
 
-- Discovered device count: **N/A — BLOCKED** (live discovery yapılmadı; hayali sayı uydurulmadı)
-- Category distribution: AP / CPE / BackhaulLink / Bridge / Router / Switch / Unknown — **N/A**
-- Low confidence count: **N/A**
-- Unknown count: **N/A**
+- **Discovered device count: 893** (DB query: `SELECT count(*) FROM network_devices`)
+- **Category distribution:**
+  - **Unknown: 892**
+  - **Router: 1**
+  - AP / CPE / BackhaulLink / Bridge / Switch: 0
+- **Low confidence count (confidence<50): 893** (hepsi)
+- **Unknown count: 892**
+- **Status distribution: unknown=893** (Dude'dan `up/down` durumu okunamadı; sadece name)
+- **device_category_evidence row count: 1** (sadece sınıflandırılan 1 Router için 1 evidence)
+- **Note:** Dude `/dude/device/print/detail` sadece `name` alanı döndürüyor. Bu nedenle classifier sınıflandırma için minimum kanıt buluyor → çoğu Unknown + confidence=0. Bu Dude veri formatı davranışı; PR #5 algoritma defekti değil.
 
 ## Safety Confirmation
 
@@ -100,32 +107,23 @@ Live discovery yapılmadı; SSH handshake EOF nedeniyle test-connection fail (ci
 
 ## Final Decision
 
-- **Status:** **BLOCKED — DEVICE-SIDE SSH UNREACHABLE.** (İlerleme: önceki "OPERATOR CREDENTIALS"tan ileri taşındı — operatör parolayı koydu, kod canlı SSH dial yaptı; cihaz tarafı SSH banner göndermiyor.)
-- **Reason:** Engineering, migration, API+DB integration ve config validation tamamen yeşil; operatör parolayı `.env`'e koydu; API doğru env ile çalıştı. Ancak hedef MikroTik cihazı (`194.15.45.62`) SSH handshake'i kabul etmiyor — TCP/22 açık, banner yok, EOF. Prompt'un conditional merge kapısı `POST /test-connection reachable=true` ve `POST /run terminal success` PASS'ı zorunlu kılıyor; ikisi de sağlanmadı. Sahte başarı raporu yok; PR merge **edilmedi**.
-- **Engineering blocker:** Yok. Kod tarafı temiz: dial → handshake fail → sanitized error → audit `failure` event → HTTP 200 + reachable=false JSON. Hiçbir secret loga/audit'e/cevaba düşmedi.
-- **Environment blocker:** Yok (lokal PG16 + API + tüm Phase 8 endpoint'leri çalışıyor).
-- **External blocker:** **Lab cihazı tarafı.** Hedef MikroTik (`194.15.45.62`) SSH server'ı yanıt vermiyor. Operatörün cihaz tarafında doğrulaması gereken konular:
-  - `/ip service print` → `ssh` enabled mı? `disabled=no`?
-  - `/ip service set ssh address=<bizim_lab_subnet>` veya `address=""` (boş = herkes; lab için OK).
-  - `/ip firewall filter` ve `/ip firewall raw` zincirlerinde input chain'de SSH'a `drop`/`tarpit` kuralı var mı? (Brute-force protection bizi banlamış olabilir — `/ip firewall address-list` listesinde bizim public IP var mı?)
-  - Cihaz gerçekten MikroTik Dude master mı, yoksa farklı bir router mı? (Identity doğrulaması.)
-  - TCP/22 başka bir cihaza port-forward edilmiyor mu? (NAT kuralları.)
-- **Out-of-scope blocker'lar (Faz 8 değil):** (1) Faz 7 `work_orders` şema çakışması (000007 vs 000001), (2) `scripts/db_migrate.sh` Windows psql URL-DSN parsing sorunu. PR #5 live smoke'unu bozmuyorlar.
+- **Status:** **BLOCKED — PR-INTERNAL DEDUPE/UPSERT DEFECT.** İlerleme: cihaz tarafı SSH düzeldi, test-connection PASS, 1. discovery run 893 cihaz çekti. Ancak ikinci run dedupe'de `SQLSTATE 23505` unique violation aldı; UpsertDevices'ta name-only cihazlar için ON CONFLICT mantığı eksik.
+- **Reason:** Conditional merge gate'i `dedupe/upsert re-run PASS` sağlanmadı. Bu PR #5'in **kendi kapsamındaki bir code defect'i** — operatör eylemi veya cihaz problemi değil.
+- **Engineering blocker — DEFECT #1 (dedupe upsert):** `internal/networkinv/repository.go` UpsertDevices fonksiyonu üç partial unique index (`uq_netdev_source_mac` / `uq_netdev_source_host_name` / `uq_netdev_source_name_when_no_id`) için uygun `ON CONFLICT DO UPDATE` clause'larını dispatch etmiyor. Cihaz mac/host olmadan name ile geldiğinde (Dude `/dude/device/print/detail` çoğu zaman böyle) ikinci INSERT 23505 alıp transaction'ı abort ediyor. **Hotfix: cihaz başına en uygun unique key'e göre ON CONFLICT clause seç** (mac varsa → `(source, mac) DO UPDATE`, host+name varsa → `(source, host, name) DO UPDATE`, else → `(source, name) WHERE ... DO UPDATE`). Veya MERGE statement (PG15+) ile dispatch.
+- **Engineering blocker — DEFECT #2 (run counter):** 1. run gerçek 893 cihaz upsert ettiği halde `discovery_runs.device_count = 0` kaldı. `FinalizeRun` veya orchestrator counter aggregation eksik. **Hotfix: discovery orchestrator'da upsert sonrası `category` bazlı `count(*)` aggregate'i alıp `FinalizeRun(stats)` çağrısına geçir.**
+- **External blocker:** Yok. Cihaz tarafı SSH operatör tarafından düzeltildi; PG ve API integration sağlam.
+- **Out-of-scope blocker'lar (PR #5 merge şartı değil):** (1) Faz 7 `work_orders` şema çakışması (000007 vs 000001), (2) `scripts/db_migrate.sh` Windows psql URL-DSN parsing sorunu. Faz 9 öncesi ayrı hardening PR.
 
-### Operatör için sonraki adım
+### Operatör/geliştirici için sonraki adım
 
-1. Lab cihazına RouterOS Winbox/SSH/Console üzerinden eriş (alternatif yol).
-2. `/ip service print` → ssh enabled + `address` listesi kontrol et.
-3. `/ip firewall filter print where chain=input` → SSH'ı engelleyen kural var mı?
-4. `/ip firewall address-list print where list~"banned|blacklist"` → bizim IP banlı mı? Banlı ise `/ip firewall address-list remove [find ...]`.
-5. SSH service düzeldikten sonra:
-   - `F:\WispOps\wisp-ops-center\.env` içindeki **duplicate** `MIKROTIK_DUDE_PASSWORD` satırlarını temizle (sadece bir tane bırak; duplicate dotenv parsing'inde "last wins" davranışı sorun yapabilir).
-   - PG16 zaten ayakta; `wispops_smoke` DB hazır.
-   - API'yi yeniden başlat (binary `F:\WispOps\wisp-ops-center\.smoke_api.exe` mevcut).
-   - `POST /test-connection` → `reachable=true` + `identity` gözle.
-   - `POST /run` → 202 + run_id; `GET /runs` terminal state.
-   - `GET /devices` + filtreler doğrula; ikinci `POST /run` ile dedupe.
-   - `audit_logs` `test_connection`, `discovery_run_started/finished` doğrula; `network_devices.raw_metadata` redaction kontrol.
-6. Smoke yeşil → `gh pr merge 5 --repo bybinbir/wisp-ops-center --squash --delete-branch`.
+1. **DEFECT #1 hotfix** (`internal/networkinv/repository.go` UpsertDevices):
+   - Her cihaz için en güçlü unique key'i seç (mac > host+name > name).
+   - O key'e karşılık gelen partial unique index için `ON CONFLICT (...) WHERE ... DO UPDATE SET ...` clause'u kullan.
+   - Unit test ekle: `TestUpsert_NameOnlyIdempotent`, `TestUpsert_MACDedupe`, `TestUpsert_HostNameDedupe`.
+2. **DEFECT #2 hotfix** (`internal/dude/discovery.go` veya finalize path):
+   - Upsert sonrası DB'den yeni durumu sayım yap veya orchestrator local counter tutsun; `FinalizeRun(runID, stats)` ile yaz.
+   - Unit test: orchestrator integration test'inde `device_count` doğrulansın.
+3. Hotfix commit'leri push edildikten sonra prompt'u (WISP-P8-DUDE-SSH-RECOVERY-SMOKE-MERGE) tekrar çalıştır → 2. run dedupe artık PASS olacak.
+4. Smoke yeşil → `gh pr merge 5 --repo bybinbir/wisp-ops-center --squash --delete-branch`.
 
-Otonom oturum smoke yeşil olmadan PR'ı merge etmedi; prompt kuralı: **live MikroTik smoke PASS olmadan merge yok**.
+Otonom oturum bu hotfix'leri **bu turda yapmadı** — architectural değişiklik (UpsertDevices yeniden tasarımı + unit test eklemesi) olduğu için scope kararı operatöre bırakıldı. Sahte başarı yok; PR merge **edilmedi**.
