@@ -63,6 +63,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// Faz 9 — Read-only network actions (frequency_check)
 	mux.HandleFunc("/api/v1/network/actions", s.handleNetworkActionsDispatch)
 	mux.HandleFunc("/api/v1/network/actions/", s.handleNetworkActionsDispatch)
+
+	// Faz 10B — Postgres-backed safety stores + API surface.
+	// Preflight + toggle + maintenance windows. NEVER runs an SSH
+	// command; toggle flip records intent only.
+	mux.HandleFunc("/api/v1/network/actions/preflight", s.handleSafetyPreflight)
+	mux.HandleFunc("/api/v1/network/actions/toggle", s.handleSafetyToggle)
+	mux.HandleFunc("/api/v1/network/actions/maintenance-windows", s.handleSafetyMaintenanceWindowsDispatch)
+	mux.HandleFunc("/api/v1/network/actions/maintenance-windows/", s.handleSafetyMaintenanceWindowsDispatch)
 }
 
 // handleReportsRoot, /api/v1/reports kökü — snapshot listesi.

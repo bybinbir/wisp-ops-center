@@ -6,9 +6,9 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3**
-- ▣ Active: **Phase 10A — Destructive safety foundation** (branch `phase/010a-destructive-safety-foundation`; PR pending; **no destructive execution enabled**)
-- ☐ Remaining: **Phase 10 — frequency_correction (DESTRUCTIVE, gated by Phase 10A pre-gate + Postgres-backed providers)**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A**
+- ▣ Active: **Phase 10B — Postgres-backed safety stores + API surface** (branch `phase/010b-postgres-safety-stores-api`; PR pending; **no destructive execution enabled**)
+- ☐ Remaining: **Phase 10C — destructive runtime (frequency_correction); requires real RBAC store + idempotency DB unique + destructive runActionAsync**
 
 ### Phase 10 preconditions (handed forward by Phase 10A)
 
@@ -19,13 +19,13 @@ Phase 10A landed the **interface scaffolding** for the destructive gate. The leg
 - ☑ Maintenance window domain model (`MaintenanceRecord` + `MaintenanceProvider`/`MaintenanceStore` + `ValidateMaintenanceRecord` + `MemoryMaintenanceStore` + `network_action_maintenance_windows` table ready).
 - ☑ Audit event catalog (`DestructiveAuditCatalog` with 7 stable event names + `AuditActionForGateError` mapper).
 - ☑ Phase 10A migration 000011 (idempotent, transactional, no DROP, 3× replay proven).
-- ☐ Postgres-backed `DestructiveToggle` writing to `network_action_toggle_flips`.
-- ☐ Postgres-backed `RBACResolver` (real role store).
-- ☐ Postgres-backed `MaintenanceStore` (CRUD endpoints + DB persistence).
-- ☐ API endpoints: list/declare window, flip toggle (only `CapabilityToggleFlip`), pre-flight check exposing `PreGateChecklist`.
-- ☐ Idempotency key DB-level uniqueness (per device + action_type + intent).
-- ☐ `runActionAsync` for destructive Kinds emitting full audit lifecycle (confirmed/gate_fail/dry_run/live_start_blocked).
-- ☐ End-to-end smoke proving closed toggle → denied; open toggle + missing window → denied; full happy → only explicit operator-confirmed write set.
+- ☑ Postgres-backed `DestructiveToggle` writing to `network_action_toggle_flips` *(Phase 10B: `PgToggleStore`)*.
+- ▣ `RBACResolver` Postgres seam *(Phase 10B: `PgRBACResolver` boundary; SQL hook reserved for Phase 10C; static fallback in production until real role store lands)*.
+- ☑ Postgres-backed `MaintenanceStore` (CRUD endpoints + DB persistence) *(Phase 10B: `PgMaintenanceStore` + 5 endpoints + migration 000012 disable columns)*.
+- ☑ API endpoints: list/declare window, flip toggle (only `CapabilityToggleFlip`), pre-flight check exposing `PreGateChecklist` *(Phase 10B: GET /preflight + POST /toggle + GET/POST /maintenance-windows + PATCH …/disable)*.
+- ☐ Idempotency key DB-level uniqueness (per device + action_type + intent) — Phase 10C.
+- ☐ `runActionAsync` for destructive Kinds emitting full audit lifecycle (confirmed/gate_fail/dry_run/live_start_blocked) — Phase 10C.
+- ☐ End-to-end smoke proving closed toggle → denied; open toggle + missing window → denied; full happy → only explicit operator-confirmed write set — Phase 10C.
 
 ### Hardening backlog (still non-blocking)
 

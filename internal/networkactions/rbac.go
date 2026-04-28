@@ -15,13 +15,21 @@ type Capability string
 const (
 	// CapabilityDestructiveExecute is the master capability required
 	// to invoke any IsDestructive action (live, not dry-run).
-	CapabilityDestructiveExecute Capability = "network.destructive.execute"
+	CapabilityDestructiveExecute Capability = "network_action.destructive.execute"
 	// CapabilityDestructiveDryRun is required to even submit a
 	// dry-run that targets a destructive Kind. Operators with read-
 	// only roles MUST NOT see destructive Kinds enumerated.
-	CapabilityDestructiveDryRun Capability = "network.destructive.dryrun"
+	CapabilityDestructiveDryRun Capability = "network_action.destructive.dryrun"
 	// CapabilityToggleFlip is required to flip the master toggle.
-	CapabilityToggleFlip Capability = "network.destructive.toggle.flip"
+	CapabilityToggleFlip Capability = "network_action.toggle.flip"
+	// CapabilityMaintenanceManage is required to create/disable
+	// maintenance windows. Read-only listing only requires
+	// CapabilityPreflightRead.
+	CapabilityMaintenanceManage Capability = "network_action.maintenance.manage"
+	// CapabilityPreflightRead is required to view the destructive
+	// preflight status (current toggle + active windows + checklist).
+	// Phase 10B exposes this through GET /api/v1/network/actions/preflight.
+	CapabilityPreflightRead Capability = "network_action.preflight.read"
 )
 
 // RBACResolver looks up the capabilities a principal holds. Phase
@@ -62,13 +70,17 @@ type StaticRoleResolver struct {
 // NewDefaultRoleResolver returns a resolver with the conservative
 // default mapping the platform ships:
 //
-//   - net_admin  → toggle flip + destructive execute + dry-run
-//   - net_ops    → destructive execute + dry-run (no toggle flip)
-//   - net_viewer → no destructive capability
+//   - net_admin  → toggle flip + destructive execute + dry-run +
+//     maintenance manage + preflight read
+//   - net_ops    → destructive execute + dry-run + maintenance
+//     manage + preflight read (no toggle flip)
+//   - net_viewer → preflight read only
 //
-// Phase 10A consumers should use this resolver until a real RBAC
+// Phase 10B consumers should use this resolver until a real RBAC
 // store lands. Tests typically construct StaticRoleResolver inline
-// to exercise edge cases.
+// to exercise edge cases. The Postgres-backed PgRBACResolver wraps
+// a real role store and falls back to a static base for unmapped
+// roles.
 func NewDefaultRoleResolver() *StaticRoleResolver {
 	return &StaticRoleResolver{
 		RoleCapabilities: map[string][]Capability{
@@ -76,12 +88,18 @@ func NewDefaultRoleResolver() *StaticRoleResolver {
 				CapabilityToggleFlip,
 				CapabilityDestructiveExecute,
 				CapabilityDestructiveDryRun,
+				CapabilityMaintenanceManage,
+				CapabilityPreflightRead,
 			},
 			"net_ops": {
 				CapabilityDestructiveExecute,
 				CapabilityDestructiveDryRun,
+				CapabilityMaintenanceManage,
+				CapabilityPreflightRead,
 			},
-			"net_viewer": {},
+			"net_viewer": {
+				CapabilityPreflightRead,
+			},
 		},
 	}
 }
