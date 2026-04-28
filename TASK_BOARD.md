@@ -6,9 +6,28 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7**
-- ▣ Active: **Phase 8 — MikroTik Dude SSH Discovery + Network Inventory** (kod + UI + docs hazır; gerçek MikroTik bağlantı testi şifre repoda olmadığı için manuel doğrulama bekliyor)
-- ☐ Remaining: **Phase 9, 10**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2**
+- ▣ Active: **Phase 9 v3 — Credential resolver + target_host validation + Phase 10 pre-gate** (branch `phase/009-v3-hardening-credential-target-validation`; PR pending)
+- ☐ Remaining: **Phase 10 — frequency_correction (DESTRUCTIVE, gated by Phase 10 pre-gate)**
+
+### Phase 10 preconditions (enforced by `internal/networkactions/phase10_pregate.go`)
+
+The master switch `DestructiveActionEnabled = false` in Phase 9 v3 keeps every destructive Kind blocked. Phase 10 may flip it only after ALL of the following land:
+
+- ☐ Operator-controlled runtime toggle (config + audit-logged flip).
+- ☐ RBAC store with real role lookup (today: constant `AllowedRolesForDestructive`).
+- ☐ Maintenance window CRUD + verification at action create-time AND start-time.
+- ☐ Rollback metadata column/jsonb + API surface.
+- ☐ Idempotency key DB-level uniqueness (per device + action_type + intent).
+- ☐ Audit event coverage for confirm/gate-fail/dry-run/live-start/rollback.
+- ☐ Per-device lock + rate limit end-to-end re-verified.
+- ☐ Allowlist deny-list regression test pinned (write paths still blocked AFTER frequency_correction lands).
+
+### Hardening backlog (still non-blocking)
+
+- ☐ Phase 7 work_orders schema conflict (000001 ↔ 000007).
+- ☐ Windows `scripts/db_migrate.sh` DSN parsing fix.
+- ☐ Operator-supplied wireless+bridge target ile happy-path live smoke (Phase 9 + 9 v2 actions hermetic-tested; live target unavailable in current lab).
 
 ---
 

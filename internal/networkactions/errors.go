@@ -55,6 +55,10 @@ func ErrorCode(err error) string {
 		return ""
 	case errors.Is(err, ErrNotConfigured):
 		return "not_configured"
+	case errors.Is(err, ErrCredentialNotFound):
+		return "credential_not_found"
+	case errors.Is(err, ErrInvalidTargetHost):
+		return "invalid_target_host"
 	case errors.Is(err, ErrTimeout):
 		return "timeout"
 	case errors.Is(err, ErrAuth):
