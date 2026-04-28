@@ -436,6 +436,79 @@ export type DudeTestResult = {
   host: string;
 };
 
+// ─── Faz 9 — Read-only Network Actions + Frequency Check ─────────────────
+
+export const ACTION_KINDS = [
+  "frequency_check",
+  "frequency_correction",
+  "ap_client_test",
+  "link_signal_test",
+  "bridge_health_check",
+  "maintenance_window",
+] as const;
+export type ActionKind = (typeof ACTION_KINDS)[number];
+
+export const ACTION_STATUSES = [
+  "queued", "running", "succeeded", "failed", "skipped",
+] as const;
+export type ActionStatus = (typeof ACTION_STATUSES)[number];
+
+export type WirelessSnapshot = {
+  interface_name: string;
+  radio_type?: string;
+  frequency?: string;
+  band?: string;
+  channel_width?: string;
+  mode?: string;
+  ssid?: string;
+  running?: boolean;
+  disabled?: boolean;
+  client_count: number;
+  avg_signal?: number;
+  worst_signal?: number;
+  avg_ccq?: number;
+  noise_floor?: number;
+  tx_rate_mbps?: number;
+  rx_rate_mbps?: number;
+  registration_ok: boolean;
+};
+
+export type FrequencyCheckResult = {
+  device_identity?: string;
+  menu_source?: string;
+  interfaces: WirelessSnapshot[];
+  warnings: string[];
+  evidence: string[];
+  skipped?: boolean;
+  skipped_reason?: string;
+};
+
+export type ActionRun = {
+  id: string;
+  action_type: ActionKind;
+  target_device_id?: string;
+  target_host?: string;
+  target_label?: string;
+  status: ActionStatus;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms: number;
+  actor: string;
+  correlation_id: string;
+  dry_run: boolean;
+  result: {
+    frequency_check?: FrequencyCheckResult;
+    commands?: Array<{ command: string; status: string; records: number; elapsed_ms: number }>;
+  };
+  command_count: number;
+  warning_count: number;
+  confidence: number;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type NetworkInventorySummary = {
   total: number;
   ap: number;

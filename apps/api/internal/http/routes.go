@@ -59,6 +59,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/network/discovery/runs", s.handleDiscoveryRuns)
 	mux.HandleFunc("/api/v1/network/devices", s.handleNetworkDevicesDispatch)
 	mux.HandleFunc("/api/v1/network/devices/", s.handleNetworkDevicesDispatch)
+
+	// Faz 9 — Read-only network actions (frequency_check)
+	mux.HandleFunc("/api/v1/network/actions", s.handleNetworkActionsDispatch)
+	mux.HandleFunc("/api/v1/network/actions/", s.handleNetworkActionsDispatch)
 }
 
 // handleReportsRoot, /api/v1/reports kökü — snapshot listesi.
