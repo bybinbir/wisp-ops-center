@@ -12,14 +12,17 @@ import (
 	"github.com/wisp-ops-center/wisp-ops-center/internal/networkinv"
 )
 
-// Phase 10C — Destructive runtime lifecycle.
+// Phase 10C / Phase 10D — Destructive runtime lifecycle.
 //
 // This file is the destructive counterpart to handlers_actions.go.
 // Critical invariants enforced by the runner below:
 //
-//   1. Destructive Kinds NEVER reach action.Execute. Phase 10C is
-//      lifecycle-only; the registry's destructive entries stay as
-//      stubs and the handler short-circuits before any SSH dial.
+//   1. Phase 10D opens a single new branch: when the gate passes for
+//      Confirm=true, action.Execute IS called. The destructive
+//      registry still maps every Kind to a stub that returns
+//      ErrActionNotImplemented, so cihaza tek byte yazılmaz. Any
+//      non-NotImplemented Execute return is a Phase 10D invariant
+//      violation and is logged + audited + finalized as failed.
 //   2. Every destructive request MUST carry an idempotency_key,
 //      intent, rollback_note. Missing fields → 400.
 //   3. A duplicate (action_type, idempotency_key) returns the
@@ -27,13 +30,18 @@ import (
 //   4. The pre-gate runs through EnsureDestructiveAllowedWithProviders.
 //      ANY failure emits the specific subtype event +
 //      `network_action.gate_fail` + `network_action.destructive_denied`.
-//   5. If the gate would pass with Confirm=true (live request),
-//      the runner emits `network_action.live_start_blocked` +
-//      `network_action.destructive_denied` and persists the run as
-//      failed. Phase 10C invariant: live execution NEVER starts.
-//   6. If the gate would pass with DryRun=true (read-mode preview),
-//      the runner emits `network_action.dry_run` and persists the
-//      run as succeeded — without calling Execute.
+//   5. If the gate passes with Confirm=true (live request), the runner
+//      emits `network_action.live_start_blocked` (Phase 10C invariant
+//      — fires before the gate runs, regardless of whether the gate
+//      passes), then `network_action.execute_attempted` (Phase 10D),
+//      then calls action.Execute. The Phase 10D path expects
+//      ErrActionNotImplemented and emits
+//      `network_action.execute_not_implemented` + finalizes failed
+//      with error_code=action_not_implemented.
+//   6. If the gate passes with DryRun=true (read-mode preview), the
+//      runner emits `network_action.dry_run` and persists the run as
+//      succeeded — without calling Execute. Dry-run never reaches
+//      the execute branch.
 
 // destructiveCreateRequest is the inbound JSON body shared by
 // /:kind/dry-run and /:kind/confirm.
@@ -455,10 +463,106 @@ func (s *Server) runDestructiveActionAsync(
 		return
 	}
 
-	// Confirm=true path with gate pass. live_start_blocked was
-	// already emitted above (before the gate ran); now finalize
-	// the deny + persist failed status. Phase 10C invariant:
-	// action.Execute is unreachable from this branch.
+	// Confirm=true path with gate pass. Phase 10D opens this branch:
+	// action.Execute IS reached. The destructive registry maps every
+	// Kind to a stub returning ErrActionNotImplemented, so the call
+	// cannot mutate the device. The two new audit events
+	// (execute_attempted before the call, execute_not_implemented
+	// after) pin the lifecycle; an auditor sees the moment authority
+	// transferred from the gate to the registered action.
+	s.audit(gateCtx, audit.Entry{
+		Actor:   principal.Actor,
+		Action:  audit.Action(networkactions.AuditActionExecuteAttempted),
+		Outcome: audit.OutcomeSuccess,
+		Subject: runID,
+		Metadata: map[string]any{
+			"run_id":           runID,
+			"action_type":      string(kind),
+			"correlation_id":   correlationID,
+			"target_host":      host,
+			"intent":           intent,
+			"kind_destructive": true,
+		},
+	})
+
+	action := s.netActions.Get(kind)
+	if action == nil {
+		// Defensive: the registry MUST have a stub for every Kind in
+		// destructiveEndpoints. A nil here means a Kind was added to
+		// the dispatcher but never registered. Treat as not-implemented.
+		s.audit(gateCtx, audit.Entry{
+			Actor:   principal.Actor,
+			Action:  audit.Action(networkactions.AuditActionExecuteNotImplemented),
+			Outcome: audit.OutcomeFailure,
+			Subject: runID,
+			Metadata: map[string]any{
+				"run_id":         runID,
+				"action_type":    string(kind),
+				"correlation_id": correlationID,
+				"error_code":     "registry_miss",
+				"reason":         "destructive_kind_not_registered",
+			},
+		})
+		_ = s.actionRepo.FinalizeRun(gateCtx, runID, networkactions.FinalizeInput{
+			Status:       networkactions.StatusFailed,
+			DurationMS:   time.Since(startedAt).Milliseconds(),
+			Result:       map[string]any{"phase": "execute_registry_miss"},
+			ErrorCode:    "registry_miss",
+			ErrorMessage: "Phase 10D: destructive Kind has no registered action.",
+		})
+		return
+	}
+
+	execCtx, execCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer execCancel()
+	_, execErr := action.Execute(execCtx, networkactions.Request{
+		Kind:          kind,
+		DeviceID:      deviceID,
+		CorrelationID: correlationID,
+		DryRun:        false,
+		Confirm:       true,
+		Actor:         principal.Actor,
+		Reason:        intent,
+	})
+
+	if errors.Is(execErr, networkactions.ErrActionNotImplemented) {
+		s.audit(gateCtx, audit.Entry{
+			Actor:   principal.Actor,
+			Action:  audit.Action(networkactions.AuditActionExecuteNotImplemented),
+			Outcome: audit.OutcomeFailure,
+			Subject: runID,
+			Metadata: map[string]any{
+				"run_id":         runID,
+				"action_type":    string(kind),
+				"correlation_id": correlationID,
+				"error_code":     "action_not_implemented",
+				"target_host":    host,
+				"intent":         intent,
+			},
+		})
+		_ = s.actionRepo.FinalizeRun(gateCtx, runID, networkactions.FinalizeInput{
+			Status:       networkactions.StatusFailed,
+			DurationMS:   time.Since(startedAt).Milliseconds(),
+			Result:       map[string]any{"phase": "execute_not_implemented"},
+			ErrorCode:    "action_not_implemented",
+			ErrorMessage: "Phase 10D: lifecycle wiring exercised; Execute reserved for Phase 10E.",
+		})
+		return
+	}
+
+	// Phase 10D MUST NOT reach this branch. Every destructive Kind is
+	// a stub returning ErrActionNotImplemented. Reaching here means a
+	// Kind was implemented before its safety review — fail closed.
+	s.log.Error("phase_10d_invariant_violated",
+		"reason", "destructive_execute_returned_non_not_implemented",
+		"action_type", string(kind),
+		"run_id", runID,
+		"err", execErr,
+	)
+	violationMsg := "Phase 10D invariant: destructive Execute returned a non-NotImplemented result. Operator must review."
+	if execErr != nil {
+		violationMsg = networkactions.SanitizeMessage(execErr.Error())
+	}
 	s.audit(gateCtx, audit.Entry{
 		Actor:   principal.Actor,
 		Action:  audit.Action(networkactions.AuditActionDestructiveDenied),
@@ -468,16 +572,16 @@ func (s *Server) runDestructiveActionAsync(
 			"run_id":         runID,
 			"action_type":    string(kind),
 			"correlation_id": correlationID,
-			"error_code":     "live_start_blocked",
-			"phase":          "live_start_blocked",
+			"error_code":     "phase_10d_invariant_violation",
+			"phase":          "phase_10d_invariant_violated",
 		},
 	})
 	_ = s.actionRepo.FinalizeRun(gateCtx, runID, networkactions.FinalizeInput{
 		Status:       networkactions.StatusFailed,
 		DurationMS:   time.Since(startedAt).Milliseconds(),
-		Result:       map[string]any{"phase": "live_start_blocked"},
-		ErrorCode:    "live_start_blocked",
-		ErrorMessage: "Phase 10C blocks live destructive execution by design.",
+		Result:       map[string]any{"phase": "phase_10d_invariant_violated"},
+		ErrorCode:    "phase_10d_invariant_violation",
+		ErrorMessage: violationMsg,
 	})
 }
 

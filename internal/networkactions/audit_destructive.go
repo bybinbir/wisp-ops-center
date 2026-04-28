@@ -54,6 +54,23 @@ const (
 	// a higher level so a single grep can find every refused
 	// destructive intent.
 	AuditActionDestructiveDenied DestructiveAuditAction = "network_action.destructive_denied"
+	// network_action.execute_attempted — Phase 10D. Emitted in the
+	// runner immediately BEFORE action.Execute is called on a
+	// destructive Kind that passed the pre-gate (toggle ON +
+	// window active + RBAC granted + confirm=true). The audit
+	// row pins the moment execution authority transferred from
+	// the gate to the registered action. Phase 10D registry stubs
+	// always return ErrActionNotImplemented, so this event is
+	// followed by ExecuteNotImplemented in every Phase 10D run.
+	AuditActionExecuteAttempted DestructiveAuditAction = "network_action.execute_attempted"
+	// network_action.execute_not_implemented — Phase 10D. Emitted
+	// in the runner immediately AFTER action.Execute returned
+	// ErrActionNotImplemented. Terminal status for the run is
+	// failed with error_code=action_not_implemented. This is the
+	// only success-shaped path through the gate that Phase 10D
+	// permits; reaching a non-NotImplemented Execute return is a
+	// Phase 10D invariant violation.
+	AuditActionExecuteNotImplemented DestructiveAuditAction = "network_action.execute_not_implemented"
 )
 
 // AuditActionForGateError maps a Phase 10A pre-gate sentinel to the
@@ -75,9 +92,9 @@ func AuditActionForGateError(err error) DestructiveAuditAction {
 }
 
 // DestructiveAuditCatalog returns every audit action name Phase 10A
-// reserves plus the three Phase 10C lifecycle events. Tests assert
-// this set matches what TASK_BOARD documents so the catalog cannot
-// drift unnoticed.
+// reserves plus the three Phase 10C lifecycle events plus the two
+// Phase 10D execute-path events. Tests assert this set matches what
+// TASK_BOARD documents so the catalog cannot drift unnoticed.
 func DestructiveAuditCatalog() []DestructiveAuditAction {
 	return []DestructiveAuditAction{
 		AuditActionConfirmed,
@@ -90,5 +107,7 @@ func DestructiveAuditCatalog() []DestructiveAuditAction {
 		AuditActionIdempotencyReused,
 		AuditActionRollbackMetadataRecorded,
 		AuditActionDestructiveDenied,
+		AuditActionExecuteAttempted,
+		AuditActionExecuteNotImplemented,
 	}
 }
