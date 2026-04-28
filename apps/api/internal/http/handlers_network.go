@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,38 @@ import (
 	"github.com/wisp-ops-center/wisp-ops-center/internal/networkinv"
 	"github.com/wisp-ops-center/wisp-ops-center/internal/scheduler"
 )
+
+// validNetworkStatuses mirrors the CHECK constraint on
+// network_devices.status. Filter values outside this set produce
+// a 400 instead of an empty result so the dashboard can surface
+// the typo immediately.
+var validNetworkStatuses = map[string]struct{}{
+	"up": {}, "down": {}, "partial": {}, "unknown": {},
+}
+
+// uuidLikeRe is a cheap shape check for the UUIDs we hand to PG.
+// Real validation is the database's job, but we want to answer 400
+// for obviously malformed ids instead of letting them reach the
+// query layer.
+func looksLikeUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			isHex := (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+			if !isHex {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 // dudeConfigFromRuntime materializes a dude.Config from server config.
 // Returns ok=false when the password is missing — the caller should
@@ -131,9 +164,27 @@ func (s *Server) handleDudeRunDiscovery(w http.ResponseWriter, r *http.Request) 
 
 // runDudeDiscoveryAsync is the goroutine body. It owns the SSH
 // connection lifecycle, persists results, refreshes evidence and
-// finalizes the run row.
+// finalizes the run row. Panics inside Run/UpsertDevices/FinalizeRun
+// are recovered so the dudeRunActive flag is always cleared and the
+// API process stays up; the run row is marked failed on recovery.
 func (s *Server) runDudeDiscoveryAsync(runID, correlationID string, cfg dude.Config) {
 	defer func() {
+		if rec := recover(); rec != nil {
+			s.log.Warn("dude_run_panic_recovered",
+				"correlation_id", correlationID,
+				"run_id", runID,
+				"panic", dude.SanitizeMessage(fmt.Sprintf("%v", rec)),
+			)
+			// Best-effort terminal state for the run row.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.netInv.FinalizeRun(ctx, runID, dude.RunResult{
+				CorrelationID: correlationID,
+				Success:       false,
+				ErrorCode:     "panic_recovered",
+				Error:         "discovery worker panicked; see server logs",
+			})
+		}
 		s.dudeRunMu.Lock()
 		s.dudeRunActive = false
 		s.dudeRunMu.Unlock()
@@ -216,6 +267,15 @@ func (s *Server) handleNetworkDevices(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if f.Status != "" {
+		if _, ok := validNetworkStatuses[f.Status]; !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "invalid_status",
+				"hint":  "up|down|partial|unknown",
+			})
+			return
+		}
+	}
 	rows, err := s.netInv.ListDevices(r.Context(), f)
 	if err != nil {
 		s.log.Warn("netdev_list_failed", "err", err)
@@ -239,6 +299,10 @@ func (s *Server) handleNetworkDeviceItem(w http.ResponseWriter, r *http.Request)
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/network/devices/")
 	if id == "" || strings.Contains(id, "/") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
+	if !looksLikeUUID(id) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
 		return
 	}
