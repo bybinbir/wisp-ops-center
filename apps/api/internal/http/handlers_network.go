@@ -65,6 +65,14 @@ func (s *Server) dudeConfigFromRuntime() (dude.Config, bool) {
 	}, true
 }
 
+// dudeConfigured reports whether the operator-side credential
+// material is ready (used by Phase 9 v3 action handlers as a cheap
+// preflight before resolving credentials per-target). It does NOT
+// expose the secret value.
+func (s *Server) dudeConfigured() bool {
+	return s.cfg.Dude.Configured()
+}
+
 // dudeKnownHostsStore returns the host-key store backed by Postgres
 // when available, and an in-memory fallback otherwise.
 func (s *Server) dudeKnownHostsStore() wispssh.KnownHostsStore {

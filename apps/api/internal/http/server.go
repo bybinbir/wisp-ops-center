@@ -52,6 +52,12 @@ type Server struct {
 
 	// Phase 9 — read-only network action framework + frequency_check
 	actionRepo *networkactions.Repository
+
+	// Phase 9 v3 — explicit credential resolver. Today the Dude
+	// admin credentials act as the static fallback; per-device
+	// credential profiles can swap this implementation without
+	// touching action code.
+	actionCreds networkactions.CredentialResolver
 }
 
 // New returns a configured HTTP server.
@@ -94,6 +100,21 @@ func New(cfg *config.Config, db *database.Pool, log *slog.Logger) *Server {
 		s.actionRepo = networkactions.NewRepository(db.P)
 	} else {
 		s.auditor = audit.NewMemorySink()
+	}
+	// Faz 9 v3: credential resolver. Provider holds a single static
+	// secret (Dude admin password) keyed by DudeStaticProfile so the
+	// audit log can name the credential bucket without ever logging
+	// the secret value. A future commit can swap MemorySecretProvider
+	// for a vault-backed implementation without touching callers.
+	s.actionCreds = &networkactions.DudeFallbackResolver{
+		Provider: networkactions.NewMemorySecretProvider(map[string]string{
+			networkactions.DudeStaticProfile: cfg.Dude.Password,
+		}),
+		Username:           cfg.Dude.Username,
+		Port:               cfg.Dude.Port,
+		HostKeyPolicy:      cfg.Dude.HostKeyPolicy,
+		HostKeyFingerprint: cfg.Dude.HostKeyFingerprint,
+		Timeout:            cfg.Dude.Timeout,
 	}
 	// Action registry her durumda hazır (DB olmasa bile UI'a 503 döneriz).
 	// Faz 9: real FrequencyCheckAction handler tarafında per-request

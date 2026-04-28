@@ -94,9 +94,19 @@ func (s *Server) handleActionCreateGeneric(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
+	// Phase 9 v3 — structural target_host validation BEFORE the DB
+	// inet cast. Any smuggled write payload (e.g. "frequency=5180")
+	// gets a clean 400 here and never reaches the database, audit,
+	// or SSH layer.
+	if err := networkactions.ValidateTargetHost(host); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid_target_host",
+			"hint":  "target_host must be a valid IPv4, IPv6 or hostname",
+		})
+		return
+	}
 
-	cfg, ok := s.dudeConfigFromRuntime()
-	if !ok {
+	if !s.dudeConfigured() {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{
 			"error": "not_configured",
 			"hint":  "MIKROTIK_DUDE_USERNAME/PASSWORD must be set so the action can authenticate to target devices",
@@ -137,8 +147,7 @@ func (s *Server) handleActionCreateGeneric(w http.ResponseWriter, r *http.Reques
 		},
 	})
 
-	go s.runActionAsync(kind, run.ID, correlationID, host, deviceID, label,
-		cfg.Username, cfg.Password, cfg.Port, cfg.HostKeyPolicy, cfg.HostKeyFingerprint, cfg.Timeout)
+	go s.runActionAsync(kind, run.ID, correlationID, host, deviceID, label)
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"run_id":         run.ID,
@@ -150,12 +159,15 @@ func (s *Server) handleActionCreateGeneric(w http.ResponseWriter, r *http.Reques
 // runActionAsync runs the chosen action in a goroutine, finalizes
 // the row, and emits the terminal audit event. Panics are recovered;
 // the run is marked failed with error_code=panic_recovered.
+//
+// Phase 9 v3: credentials are resolved through s.actionCreds
+// (CredentialResolver) per-call, so per-device profiles can replace
+// the Dude fallback later without touching this body. A typed
+// ErrCredentialNotFound is surfaced as a stable error_code
+// ("credential_not_found") and NEVER triggers an SSH dial.
 func (s *Server) runActionAsync(
 	kind networkactions.Kind,
 	runID, correlationID, host, deviceID, label string,
-	username, password string, port int,
-	hostKeyPolicy, hostKeyFingerprint string,
-	timeout time.Duration,
 ) {
 	startedAt := time.Now()
 	defer func() {
@@ -181,18 +193,18 @@ func (s *Server) runActionAsync(
 		s.log.Warn("nwaction_mark_running_failed", "err", err, "run_id", runID)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout+45*time.Second)
+	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	target, credErr := s.actionCreds.Resolve(resolveCtx, deviceID, host)
+	resolveCancel()
+	if credErr != nil {
+		s.handleActionCredentialFailure(runID, correlationID, host, deviceID, label, kind,
+			startedAt, credErr)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), target.Timeout+45*time.Second)
 	defer cancel()
 
-	target := networkactions.SSHTarget{
-		Host:               host,
-		Port:               port,
-		Username:           username,
-		Password:           password,
-		Timeout:            timeout,
-		HostKeyPolicy:      hostKeyPolicy,
-		HostKeyFingerprint: hostKeyFingerprint,
-	}
 	action := s.buildAction(kind, target)
 
 	res, err := action.Execute(ctx, networkactions.Request{
@@ -268,6 +280,51 @@ func (s *Server) runActionAsync(
 			"warning_count":    warningCount,
 			"confidence":       confidence,
 			"error_code":       finalErrCode,
+		},
+	})
+}
+
+// handleActionCredentialFailure finalizes a run row and emits the
+// correct audit event when CredentialResolver.Resolve fails. The
+// SSH layer is NEVER reached; error_code reflects the typed
+// resolver error.
+func (s *Server) handleActionCredentialFailure(
+	runID, correlationID, host, deviceID, label string,
+	kind networkactions.Kind,
+	startedAt time.Time,
+	credErr error,
+) {
+	errCode := networkactions.ErrorCode(credErr)
+	if errCode == "" || errCode == "unknown" {
+		errCode = "credential_resolve_failed"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = s.actionRepo.FinalizeRun(ctx, runID, networkactions.FinalizeInput{
+		Status:       networkactions.StatusFailed,
+		DurationMS:   time.Since(startedAt).Milliseconds(),
+		Result:       map[string]any{},
+		ErrorCode:    errCode,
+		ErrorMessage: networkactions.SanitizeMessage(credErr.Error()),
+	})
+	s.audit(ctx, audit.Entry{
+		Actor:   "system",
+		Action:  audit.Action("network_action.failed"),
+		Outcome: audit.OutcomeFailure,
+		Subject: host,
+		Metadata: map[string]any{
+			"run_id":           runID,
+			"action_type":      string(kind),
+			"correlation_id":   correlationID,
+			"target_device_id": deviceID,
+			"target_host":      host,
+			"target_label":     label,
+			"status":           string(networkactions.StatusFailed),
+			"error_code":       errCode,
+			"duration_ms":      time.Since(startedAt).Milliseconds(),
+			// Phase 9 v3: name the credential bucket consulted, NEVER
+			// the secret value.
+			"credential_profile": networkactions.DudeStaticProfile,
 		},
 	})
 }
