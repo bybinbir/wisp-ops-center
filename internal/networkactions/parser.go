@@ -317,6 +317,131 @@ func aggregateRegistration(records []map[string]string) regSummary {
 }
 
 // ----------------------------------------------------------------------------
+// Phase 9 v2 — bridge + per-client parsers
+// ----------------------------------------------------------------------------
+
+// parseBridgeList parses /interface/bridge/print/detail.
+func parseBridgeList(out string) []BridgeStat {
+	records := parseDetailPrint(out)
+	bs := make([]BridgeStat, 0, len(records))
+	for _, r := range records {
+		s := BridgeStat{Name: pickFirst(r, "name")}
+		if v, ok := r["running"]; ok {
+			b := isTrue(v)
+			s.Running = &b
+		}
+		if v, ok := r["disabled"]; ok {
+			b := isTrue(v)
+			s.Disabled = &b
+		}
+		bs = append(bs, s)
+	}
+	return bs
+}
+
+// parseBridgePorts parses /interface/bridge/port/print/detail.
+func parseBridgePorts(out string) []BridgePort {
+	records := parseDetailPrint(out)
+	ports := make([]BridgePort, 0, len(records))
+	for _, r := range records {
+		p := BridgePort{
+			Bridge:        pickFirst(r, "bridge"),
+			InterfaceName: pickFirst(r, "interface"),
+			Status:        pickFirst(r, "status"),
+		}
+		if v, ok := r["disabled"]; ok {
+			b := isTrue(v)
+			p.Disabled = &b
+		}
+		// running on a bridge port may come from the parent interface
+		// listing; we leave it nil here and let the action correlate
+		// against /interface/print/detail.
+		ports = append(ports, p)
+	}
+	return ports
+}
+
+// extractClients walks a registration-table print/detail output and
+// returns one ClientStat per row. Used by ap_client_test for the
+// per-client metrics. MAC is masked to the first 5 bytes
+// ("AA:BB:CC:DD:EE") so the result jsonb does not carry fully
+// resolvable customer device identifiers.
+func extractClients(out string) []ClientStat {
+	records := parseDetailPrint(out)
+	clients := make([]ClientStat, 0, len(records))
+	for _, r := range records {
+		c := ClientStat{
+			MACPrefix:     maskMAC(pickFirst(r, "mac-address")),
+			InterfaceName: pickFirst(r, "interface"),
+		}
+		if v := pickFirst(r, "signal-strength", "signal", "rssi"); v != "" {
+			c.Signal = parseSignedInt(v)
+		}
+		if v := pickFirst(r, "ccq", "tx-ccq"); v != "" {
+			c.CCQ = parsePercent(v)
+		}
+		if v := pickFirst(r, "tx-rate"); v != "" {
+			c.TxRateMbps = parseMbps(v)
+		}
+		if v := pickFirst(r, "rx-rate"); v != "" {
+			c.RxRateMbps = parseMbps(v)
+		}
+		if v := pickFirst(r, "uptime"); v != "" {
+			c.UptimeSeconds = parseUptimeToSeconds(v)
+		}
+		clients = append(clients, c)
+	}
+	return clients
+}
+
+// maskMAC truncates "AA:BB:CC:DD:EE:FF" → "AA:BB:CC:DD:EE:**". Empty
+// input passes through. Anything that isn't 6 ":"-separated octets
+// is left as-is (defensive).
+func maskMAC(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) != 6 {
+		return s
+	}
+	return strings.Join(parts[:5], ":") + ":**"
+}
+
+// parseUptimeToSeconds accepts RouterOS-style "1d2h3m4s" / "2h45m" /
+// "30s" and returns total seconds. 0 on parse failure.
+func parseUptimeToSeconds(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	var total int64
+	var num int64
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			num = num*10 + int64(c-'0')
+			continue
+		}
+		switch c {
+		case 'w':
+			total += num * 7 * 86400
+		case 'd':
+			total += num * 86400
+		case 'h':
+			total += num * 3600
+		case 'm':
+			total += num * 60
+		case 's':
+			total += num
+		}
+		num = 0
+	}
+	return total
+}
+
+// ----------------------------------------------------------------------------
 // helpers
 // ----------------------------------------------------------------------------
 

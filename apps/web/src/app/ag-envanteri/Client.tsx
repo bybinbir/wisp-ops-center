@@ -329,7 +329,7 @@ export function NetworkInventoryClient() {
                 <td>{d.status}</td>
                 <td style={{ fontSize: 12 }}>{new Date(d.last_seen_at).toLocaleString("tr-TR")}</td>
                 <td>
-                  <FrequencyCheckButton device={d} />
+                  <ActionButtons device={d} />
                 </td>
               </tr>
             ))}
@@ -340,61 +340,84 @@ export function NetworkInventoryClient() {
   );
 }
 
-function FrequencyCheckButton({ device }: { device: NetworkDevice }) {
-  const [submitting, setSubmitting] = useState(false);
+// ActionButtons renders the four read-only Phase 9 / 9 v2 actions
+// inline on each inventory row. Mutating actions (frequency apply,
+// reboot, etc.) intentionally have NO UI affordance.
+function ActionButtons({ device }: { device: NetworkDevice }) {
+  const [submitting, setSubmitting] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
-  const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
+  const [submittedKind, setSubmittedKind] = useState<string | null>(null);
 
   const canRun = !!device.host;
 
-  async function startFreqCheck() {
-    setSubmitting(true);
+  const actions: Array<{ kind: string; label: string; suffix: string; color: string }> = [
+    { kind: "frequency_check",    label: "Frekans",      suffix: "frequency-check",   color: "#1d6" },
+    { kind: "ap_client_test",     label: "AP Client",    suffix: "ap-client-test",    color: "#28a" },
+    { kind: "link_signal_test",   label: "Link Signal",  suffix: "link-signal-test",  color: "#a3a" },
+    { kind: "bridge_health_check",label: "Bridge Health",suffix: "bridge-health-check",color: "#a52" },
+  ];
+
+  async function start(suffix: string, kind: string) {
+    setSubmitting(kind);
     setError(null);
     try {
-      const res = await api.post<{ run_id: string; status: string }>(
-        "/api/v1/network/actions/frequency-check",
+      await api.post<{ run_id: string; status: string }>(
+        `/api/v1/network/actions/${suffix}`,
         { target_device_id: device.id }
       );
-      setSubmittedRunId(res.run_id);
+      setSubmittedKind(kind);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
-      setSubmitting(false);
+      setSubmitting("");
     }
   }
 
-  if (submittedRunId) {
+  if (submittedKind) {
     return (
       <Link href="/aksiyonlar" style={{ fontSize: 11, color: "#36c" }}>
-        Çalıştırıldı → /aksiyonlar
+        {ACTION_TR[submittedKind] ?? submittedKind} → /aksiyonlar
       </Link>
     );
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <button
-        type="button"
-        disabled={!canRun || submitting}
-        onClick={startFreqCheck}
-        title={canRun ? "Read-only frekans kontrolü başlat" : "Cihaz IP'si yok, kontrol başlatılamaz"}
-        style={{
-          fontSize: 11,
-          padding: "2px 8px",
-          background: canRun ? "#1d6" : "#444",
-          color: "#fff",
-          border: "none",
-          borderRadius: 3,
-          cursor: canRun && !submitting ? "pointer" : "default",
-          opacity: canRun ? 1 : 0.6,
-        }}
-      >
-        {submitting ? "Başlatılıyor…" : "Frekans Kontrol"}
-      </button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+        {actions.map((a) => (
+          <button
+            key={a.kind}
+            type="button"
+            disabled={!canRun || submitting !== ""}
+            onClick={() => start(a.suffix, a.kind)}
+            title={canRun ? "Read-only " + a.label : "Cihaz IP'si yok"}
+            style={{
+              fontSize: 10,
+              padding: "2px 6px",
+              background: canRun ? a.color : "#444",
+              color: "#fff",
+              border: "none",
+              borderRadius: 3,
+              cursor: canRun && submitting === "" ? "pointer" : "default",
+              opacity: canRun ? 1 : 0.6,
+            }}
+          >
+            {submitting === a.kind ? "…" : a.label}
+          </button>
+        ))}
+      </div>
       {error ? <span style={{ fontSize: 10, color: "#fa3" }}>{error}</span> : null}
     </div>
   );
 }
+
+const ACTION_TR: Record<string, string> = {
+  frequency_check: "Frekans",
+  ap_client_test: "AP Client",
+  link_signal_test: "Link Signal",
+  bridge_health_check: "Bridge Health",
+};
+
 
 function EnrichmentCard({ run }: { run: DiscoveryRun }) {
   const attempted = run.enrichment_sources_attempted ?? [];

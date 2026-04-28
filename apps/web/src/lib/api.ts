@@ -483,6 +483,79 @@ export type FrequencyCheckResult = {
   skipped_reason?: string;
 };
 
+export type ClientStat = {
+  mac_prefix?: string;
+  interface_name?: string;
+  signal?: number;
+  ccq?: number;
+  tx_rate_mbps?: number;
+  rx_rate_mbps?: number;
+  uptime_seconds?: number;
+  reason?: string;
+};
+
+export type APClientTestResult = {
+  device_identity?: string;
+  menu_source?: string;
+  interfaces: WirelessSnapshot[];
+  client_count: number;
+  weak_clients: ClientStat[];
+  low_ccq_clients: ClientStat[];
+  avg_signal?: number;
+  worst_signal?: number;
+  avg_ccq?: number;
+  warnings: string[];
+  evidence: string[];
+  skipped?: boolean;
+  skipped_reason?: string;
+};
+
+export type LinkSignalTestResult = {
+  device_identity?: string;
+  menu_source?: string;
+  local_interface?: string;
+  link_detected: boolean;
+  remote_identifier?: string;
+  signal?: number;
+  tx_rate_mbps?: number;
+  rx_rate_mbps?: number;
+  ccq?: number;
+  health_status: "healthy" | "warning" | "critical" | "unknown";
+  warnings: string[];
+  evidence: string[];
+  skipped?: boolean;
+  skipped_reason?: string;
+};
+
+export type BridgeStat = {
+  name: string;
+  running?: boolean;
+  disabled?: boolean;
+  port_count: number;
+};
+
+export type BridgePort = {
+  bridge: string;
+  interface_name: string;
+  running?: boolean;
+  disabled?: boolean;
+  status?: string;
+};
+
+export type BridgeHealthResult = {
+  device_identity?: string;
+  bridge_count: number;
+  bridge_ports_count: number;
+  bridges: BridgeStat[];
+  down_ports: BridgePort[];
+  disabled_ports: BridgePort[];
+  running_summary?: string;
+  warnings: string[];
+  evidence: string[];
+  skipped?: boolean;
+  skipped_reason?: string;
+};
+
 export type ActionRun = {
   id: string;
   action_type: ActionKind;
