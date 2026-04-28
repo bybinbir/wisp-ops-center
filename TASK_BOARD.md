@@ -6,9 +6,9 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A**
-- ▣ Active: **Phase 10B — Postgres-backed safety stores + API surface** (branch `phase/010b-postgres-safety-stores-api`; PR pending; **no destructive execution enabled**)
-- ☐ Remaining: **Phase 10C — destructive runtime (frequency_correction); requires real RBAC store + idempotency DB unique + destructive runActionAsync**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A, 10B, 10C**
+- ▣ Active: **Phase 10D — destructive happy-path lifecycle (no execution)** — branch henüz açılmadı; gate'ten geçen ilk dry-run/confirm yolu; Execute() hâlâ stub (`ErrActionNotImplemented`); cihaza tek byte yazılmaz.
+- ☐ Remaining: **Phase 10E — gerçek mutation execution** (tek action + tek device + dry-run karşılaştırma + rollback drill); **Phase 10F — production hardening** (TLS uçtan uca, KMS, Prometheus alerts, multi-tenant RBAC izolasyon, SOC2 / KVKK uyum)
 
 ### Phase 10 preconditions (handed forward by Phase 10A)
 
@@ -23,9 +23,9 @@ Phase 10A landed the **interface scaffolding** for the destructive gate. The leg
 - ▣ `RBACResolver` Postgres seam *(Phase 10B: `PgRBACResolver` boundary; SQL hook reserved for Phase 10C; static fallback in production until real role store lands)*.
 - ☑ Postgres-backed `MaintenanceStore` (CRUD endpoints + DB persistence) *(Phase 10B: `PgMaintenanceStore` + 5 endpoints + migration 000012 disable columns)*.
 - ☑ API endpoints: list/declare window, flip toggle (only `CapabilityToggleFlip`), pre-flight check exposing `PreGateChecklist` *(Phase 10B: GET /preflight + POST /toggle + GET/POST /maintenance-windows + PATCH …/disable)*.
-- ☐ Idempotency key DB-level uniqueness (per device + action_type + intent) — Phase 10C.
-- ☐ `runActionAsync` for destructive Kinds emitting full audit lifecycle (confirmed/gate_fail/dry_run/live_start_blocked) — Phase 10C.
-- ☐ End-to-end smoke proving closed toggle → denied; open toggle + missing window → denied; full happy → only explicit operator-confirmed write set — Phase 10C.
+- ☑ Idempotency key DB-level uniqueness (per device + action_type + intent) *(Phase 10C: migration 000013, partial unique index, FindByIdempotencyKey reuse path)*.
+- ☑ `runDestructiveActionAsync` for destructive Kinds emitting full audit lifecycle *(Phase 10C: confirmed → rollback_metadata_recorded → live_start_blocked → gate_fail → destructive_denied; Execute hiç çağrılmaz, master switch kapalı)*.
+- ▣ End-to-end smoke proving closed toggle → denied path *(Phase 10B/10C: kanıtlandı, 12/12 dry_run=true, 0 destructive succeeded)*. **Happy-path** (toggle ON + window aktif + RBAC granted → gate_pass + Execute stub) → **Phase 10D**.
 
 ### Hardening backlog (still non-blocking)
 
@@ -335,14 +335,49 @@ Detay: `docs/PHASE_008_MIKROTIK_DUDE_DISCOVERY.md`. Branch: `phase/008-mikrotik-
 - ☐ Apply işlemi sonrası verification + otomatik rollback
 - ☐ En yüksek risk: hiçbir adım el kayması ile başlamamalı
 
-## 8. Phase 10 Planned — Production Hardening
+## 8. Phase 10 — Destructive Action Safety Track
 
-- ☐ TLS uçtan uca + secret rotasyon prosedürü
-- ☐ Vault/KMS entegrasyonu
-- ☐ Prometheus + alert rules
-- ☐ Backup/restore drill
-- ☐ RBAC + multi-tenant izolasyon
-- ☐ SOC2 / KVKK uyum kontrol listesi
+### Phase 10A — Safety Foundation: ☑ MERGED (`ff489da`)
+- DestructiveToggle + RBACResolver + MaintenanceProvider/Store + audit catalog (7 stable event names) + provider-tabanlı 8-step pre-gate.
+- Migration 000011: `network_action_toggle_flips` + `network_action_maintenance_windows`.
+- Master switch iki katmanlı fail-closed: legacy global + `MemoryToggle.Enabled() = false`.
+- 25 yeni test (toplam 83); 12/12 dry_run=true, 0 destructive execution.
+
+### Phase 10B — Postgres Safety Stores + API: ☑ MERGED (`92f32ac`)
+- PgToggleStore (append-only INSERT) + PgMaintenanceStore (Create/List/Get/ActiveAt/Disable) + PgRBACResolver (typed seam, fallback delegate).
+- 5 API endpoint: `GET /preflight`, `POST /toggle`, `GET/POST /maintenance-windows`, `PATCH …/disable`. `requireCapability` tek choke-point; 403 + audit `network_action.rbac_denied`.
+- Capability namespace `network_action.*` + 2 yeni: `maintenance.manage`, `preflight.read`.
+- Migration 000012: disable kolonları + partial index. 3× idempotent replay temiz.
+- 8 yeni test (toplam 91); 11-senaryo HTTP smoke; toggle son satır `enabled=false` (review_bot).
+
+### Phase 10C — Destructive Runtime Lifecycle (no execution): ☑ MERGED (`927c711`)
+- PgRoleResolver SQL store + idempotency-key DB uniqueness + rollback metadata + 3 yeni audit event (`idempotency_reused`, `rollback_metadata_recorded`, `destructive_denied`).
+- `runDestructiveActionAsync`: Execute() **hiç çağrılmaz**; gate fail-closed; lifecycle audit eksiksiz.
+- 2 endpoint (`/destructive/{kind}/dry-run`, `/confirm`) + 1 lifecycle GET.
+- Migration 000013: `network_action_role_grants` + `idempotency_key/intent/rollback_note` + uniq partial index. 3× post-merge replay temiz.
+- Pre-merge fix `ca9311d`: `live_start_blocked` emission gate'ten ÖNCE confirm path'inde.
+- 17 yeni test (toplam 108); lab smoke 9 senaryo; DB invariants: 12/12 dry_run=true, 6 destructive runs status=failed/error_code=destructive_disabled, 0 succeeded, 0 mutation cmd, 0 secret leak (3 kaynak), 0 raw MAC.
+
+### Phase 10D — Destructive Happy-Path Lifecycle (no execution): ▣ ACTIVE
+- **Hedef:** Toggle ON + window aktif + RBAC granted senaryosunda 8-step pre-gate'ten geçen ilk yol; Execute() hâlâ stub `ErrActionNotImplemented` döner; lifecycle full audit emit eder.
+- **Yeni audit event'leri:** `network_action.execute_attempted`, `network_action.execute_not_implemented` (gate_pass'ten sonra).
+- **Senaryo matrisi:** {toggle on/off} × {window aktif/yok} × {RBAC granted/denied} × {idempotency yeni/yeniden}.
+- **Hedef test diff:** +12-15 yeni test (toplam ~120-123).
+- **Migration:** gerekmiyor (000013 yeterli).
+- **DoD:** master switch açıkken bile `0 destructive succeeded`, `0 mutation cmd`, `0 secret leak`, `0 raw MAC`; lifecycle 5+ event/run; happy-path smoke senaryosu kanıtlı.
+
+### Phase 10E — Real Mutation Execution: ☐ Planned
+- Tek action (frequency_correction önerisi) + tek device + dry-run vs live diff karşılaştırma + verification + auto-rollback path.
+- Per-device per-action lock (Phase 8 framework + idempotency DB unique = hazır).
+- Bu fazın ilk PR'ı **production'a açmaz** — sadece lab smoke; production toggle ayrı bir karar.
+
+### Phase 10F — Production Hardening: ☐ Planned
+- TLS uçtan uca + secret rotasyon prosedürü.
+- Vault/KMS entegrasyonu (vault entry `wisp-ops-center/secret/...`).
+- Prometheus + alert rules (gate denied rate, destructive run rate, audit event spike).
+- Backup/restore drill (Postgres physical + logical, point-in-time recovery test).
+- RBAC + multi-tenant izolasyon (PgRoleResolver SQL-first, RequireSQL=true).
+- SOC2 / KVKK uyum kontrol listesi.
 
 ---
 
