@@ -10,17 +10,26 @@ import (
 func TestDefaultRoleResolver_KnownRoles(t *testing.T) {
 	r := NewDefaultRoleResolver()
 
+	// Phase 10B extended the default mapping: every role with any
+	// destructive responsibility also gets PreflightRead, and a
+	// new MaintenanceManage capability lands on net_admin/net_ops.
+	// net_viewer keeps PreflightRead so the operator UI can render
+	// the destructive status panel under read-only sessions.
 	cases := []struct {
 		roles []string
 		want  []Capability
 	}{
 		{[]string{"net_admin"}, []Capability{
 			CapabilityToggleFlip, CapabilityDestructiveExecute, CapabilityDestructiveDryRun,
+			CapabilityMaintenanceManage, CapabilityPreflightRead,
 		}},
 		{[]string{"net_ops"}, []Capability{
 			CapabilityDestructiveExecute, CapabilityDestructiveDryRun,
+			CapabilityMaintenanceManage, CapabilityPreflightRead,
 		}},
-		{[]string{"net_viewer"}, []Capability{}},
+		{[]string{"net_viewer"}, []Capability{
+			CapabilityPreflightRead,
+		}},
 		{[]string{"unknown_role"}, []Capability{}},
 		{[]string{}, []Capability{}},
 	}
@@ -50,6 +59,8 @@ func TestDefaultRoleResolver_RoleUnion(t *testing.T) {
 		CapabilityToggleFlip:         true,
 		CapabilityDestructiveExecute: true,
 		CapabilityDestructiveDryRun:  true,
+		CapabilityMaintenanceManage:  true,
+		CapabilityPreflightRead:      true,
 	}
 	for _, c := range got {
 		if !want[c] {

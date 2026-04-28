@@ -58,6 +58,14 @@ type Server struct {
 	// credential profiles can swap this implementation without
 	// touching action code.
 	actionCreds networkactions.CredentialResolver
+
+	// Phase 10B — Postgres-backed safety stores + RBAC boundary.
+	// Master switch toggle, maintenance windows, and role/capability
+	// resolution all run through these provider seams.
+	actionToggle      networkactions.DestructiveToggle
+	actionWindows     *networkactions.PgMaintenanceStore
+	actionWindowsProv networkactions.MaintenanceProvider
+	actionRBAC        networkactions.RBACResolver
 }
 
 // New returns a configured HTTP server.
@@ -98,8 +106,27 @@ func New(cfg *config.Config, db *database.Pool, log *slog.Logger) *Server {
 		s.netInv = networkinv.NewRepository(db.P)
 		// Faz 9: action repository (network_action_runs).
 		s.actionRepo = networkactions.NewRepository(db.P)
+		// Faz 10B: Postgres-backed safety stores. Toggle stays
+		// fail-closed by default (empty toggle_flips → Enabled=false).
+		s.actionToggle = networkactions.NewPgToggleStore(db.P)
+		windows := networkactions.NewPgMaintenanceStore(db.P)
+		s.actionWindows = windows
+		s.actionWindowsProv = windows
+		// RBAC: Postgres-backed seam, but Phase 10B delegates to the
+		// static fallback until the real role store lands. The seam
+		// keeps Phase 10C swap-in trivial.
+		s.actionRBAC = networkactions.NewPgRBACResolver(db.P, networkactions.NewDefaultRoleResolver())
 	} else {
 		s.auditor = audit.NewMemorySink()
+		// No DB → safety provider seam falls back to fail-closed
+		// in-memory implementations so test/dev still gets a sane
+		// surface (default-closed toggle, empty window store).
+		s.actionToggle = networkactions.NewMemoryToggle()
+		mem := networkactions.NewMemoryMaintenanceStore()
+		s.actionWindows = nil // Postgres-only writes; in-memory store
+		// is exposed via the provider seam.
+		s.actionWindowsProv = mem
+		s.actionRBAC = networkactions.NewDefaultRoleResolver()
 	}
 	// Faz 9 v3: credential resolver. Provider holds a single static
 	// secret (Dude admin password) keyed by DudeStaticProfile so the
