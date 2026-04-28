@@ -333,6 +333,34 @@ func (s *Server) runDestructiveActionAsync(
 		Now:            now,
 	}
 
+	// Phase 10C architectural invariant: every confirm POST that
+	// reaches the runner is recorded as `live_start_blocked` BEFORE
+	// the gate runs. The gate may also reject the request earlier
+	// (for example, with the master switch closed it returns
+	// ErrDestructiveDisabled) — but the live_start_blocked event
+	// pins the higher-level invariant: live execution is never
+	// reachable from this code path. An auditor grepping for
+	// `network_action.live_start_blocked` finds every operator who
+	// asked for live destructive execution, regardless of why the
+	// gate ultimately stopped them.
+	if confirm {
+		s.audit(gateCtx, audit.Entry{
+			Actor:   principal.Actor,
+			Action:  audit.Action(networkactions.AuditActionLiveStartBlocked),
+			Outcome: audit.OutcomeFailure,
+			Subject: runID,
+			Metadata: map[string]any{
+				"run_id":         runID,
+				"action_type":    string(kind),
+				"correlation_id": correlationID,
+				"target_host":    host,
+				"intent":         intent,
+				"phase":          "live_start_blocked",
+				"reason":         "phase_10c_destructive_runtime_disabled",
+			},
+		})
+	}
+
 	gateErr := networkactions.EnsureDestructiveAllowedWithProviders(gateCtx, providers, gateReq)
 
 	// On gate failure: emit the specific subtype event + gate_fail +
@@ -427,22 +455,10 @@ func (s *Server) runDestructiveActionAsync(
 		return
 	}
 
-	// Confirm=true path. Phase 10C MUST block live execution.
-	s.audit(gateCtx, audit.Entry{
-		Actor:   principal.Actor,
-		Action:  audit.Action(networkactions.AuditActionLiveStartBlocked),
-		Outcome: audit.OutcomeFailure,
-		Subject: runID,
-		Metadata: map[string]any{
-			"run_id":         runID,
-			"action_type":    string(kind),
-			"correlation_id": correlationID,
-			"target_host":    host,
-			"intent":         intent,
-			"phase":          "live_start_blocked",
-			"reason":         "phase_10c_destructive_runtime_disabled",
-		},
-	})
+	// Confirm=true path with gate pass. live_start_blocked was
+	// already emitted above (before the gate ran); now finalize
+	// the deny + persist failed status. Phase 10C invariant:
+	// action.Execute is unreachable from this branch.
 	s.audit(gateCtx, audit.Entry{
 		Actor:   principal.Actor,
 		Action:  audit.Action(networkactions.AuditActionDestructiveDenied),
