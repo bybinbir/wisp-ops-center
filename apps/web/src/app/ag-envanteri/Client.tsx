@@ -20,6 +20,8 @@ type Filters = {
   status: string;
   unknownOnly: boolean;
   lowConf: boolean;
+  hasMac: boolean;
+  enriched: boolean;
 };
 
 const emptyFilters: Filters = {
@@ -27,6 +29,8 @@ const emptyFilters: Filters = {
   status: "",
   unknownOnly: false,
   lowConf: false,
+  hasMac: false,
+  enriched: false,
 };
 
 export function NetworkInventoryClient() {
@@ -46,6 +50,8 @@ export function NetworkInventoryClient() {
     if (f.status) params.set("status", f.status);
     if (f.lowConf) params.set("low_confidence", "1");
     if (f.unknownOnly) params.set("unknown", "1");
+    if (f.hasMac) params.set("has_mac", "1");
+    if (f.enriched) params.set("enriched", "1");
     const qs = params.toString();
     const path = qs ? `/api/v1/network/devices?${qs}` : "/api/v1/network/devices";
     return api.get<{ data: NetworkDevice[]; summary: NetworkInventorySummary }>(path);
@@ -79,7 +85,14 @@ export function NetworkInventoryClient() {
 
   useEffect(() => {
     reload();
-  }, [filters.category, filters.status, filters.lowConf, filters.unknownOnly]);
+  }, [
+    filters.category,
+    filters.status,
+    filters.lowConf,
+    filters.unknownOnly,
+    filters.hasMac,
+    filters.enriched,
+  ]);
 
   async function runTest() {
     setTesting(true);
@@ -111,7 +124,6 @@ export function NetworkInventoryClient() {
       await api.post<{ run_id: string; status: string }>(
         "/api/v1/network/discovery/mikrotik-dude/run"
       );
-      // Discovery is async — re-poll runs every 2s for ~30s.
       let attempts = 0;
       const tick = setInterval(async () => {
         attempts++;
@@ -148,6 +160,12 @@ export function NetworkInventoryClient() {
         <StatCard title="Switch" value={summary?.switch ?? 0} />
         <StatCard title="Bilinmeyen" value={summary?.unknown ?? 0} />
       </div>
+      <div className="grid grid-4" style={{ marginBottom: 16 }}>
+        <StatCard title="MAC kazandı" value={summary?.with_mac ?? 0} />
+        <StatCard title="Host kazandı" value={summary?.with_host ?? 0} />
+        <StatCard title="Enriched" value={summary?.enriched ?? 0} />
+        <StatCard title="Düşük Confidence" value={summary?.low_confidence ?? 0} />
+      </div>
 
       <Toolbar>
         <Button onClick={runTest} disabled={testing}>
@@ -174,6 +192,10 @@ export function NetworkInventoryClient() {
             ? `Erişim OK · ${test.host} · identity=${test.identity ?? "-"} · ${test.duration_ms}ms`
             : `Erişilemiyor · ${test.host} · ${test.error_code ?? "?"} · ${test.error ?? ""}`}
         </div>
+      )}
+
+      {lastRun && (
+        <EnrichmentCard run={lastRun} />
       )}
 
       {lastError && (
@@ -224,7 +246,24 @@ export function NetworkInventoryClient() {
           />
           Sadece bilinmeyen
         </label>
-        {(filters.category || filters.status || filters.lowConf || filters.unknownOnly) && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={filters.hasMac}
+            onChange={(e) => setFilters((f) => ({ ...f, hasMac: e.target.checked }))}
+          />
+          MAC var
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={filters.enriched}
+            onChange={(e) => setFilters((f) => ({ ...f, enriched: e.target.checked }))}
+          />
+          Enriched
+        </label>
+        {(filters.category || filters.status || filters.lowConf || filters.unknownOnly ||
+          filters.hasMac || filters.enriched) && (
           <Button onClick={() => setFilters(emptyFilters)}>Filtreleri Temizle</Button>
         )}
       </Toolbar>
@@ -249,9 +288,10 @@ export function NetworkInventoryClient() {
               <th>IP</th>
               <th>Kategori</th>
               <th>Confidence</th>
+              <th>Kanıt</th>
+              <th>Platform</th>
               <th>Durum</th>
               <th>Son Görüldü</th>
-              <th>Kaynak</th>
             </tr>
           </thead>
           <tbody>
@@ -277,14 +317,65 @@ export function NetworkInventoryClient() {
                     color: d.confidence < 50 ? "#fa3" : d.confidence < 80 ? "#cc3" : "#0c5",
                   }}>{d.confidence}</span>
                 </td>
+                <td style={{ fontSize: 11, color: "#aaa" }}>
+                  {d.evidence_summary || "—"}
+                </td>
+                <td style={{ fontSize: 12 }}>
+                  {d.platform || "—"}
+                  {d.interface_name ? <div style={{ fontSize: 10, color: "#888" }}>{d.interface_name}</div> : null}
+                </td>
                 <td>{d.status}</td>
-                <td>{new Date(d.last_seen_at).toLocaleString("tr-TR")}</td>
-                <td>{d.source}</td>
+                <td style={{ fontSize: 12 }}>{new Date(d.last_seen_at).toLocaleString("tr-TR")}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+function EnrichmentCard({ run }: { run: DiscoveryRun }) {
+  const attempted = run.enrichment_sources_attempted ?? [];
+  const succeeded = new Set(run.enrichment_sources_succeeded ?? []);
+  const skipped = new Set(run.enrichment_sources_skipped ?? []);
+  if (attempted.length === 0) {
+    return null;
+  }
+  return (
+    <div style={{
+      margin: "12px 0",
+      padding: 12,
+      background: "#0e1014",
+      border: "1px solid #1f242c",
+      borderRadius: 6,
+      fontSize: 12,
+      color: "#cfd3d8",
+    }}>
+      <div style={{ marginBottom: 6, color: "#9aa1aa" }}>
+        Enrichment kaynakları · {run.enrichment_duration_ms ?? 0}ms ·
+        MAC: {run.with_mac_count ?? 0} · Host: {run.with_host_count ?? 0} ·
+        Enriched: {run.enriched_count ?? 0}
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {attempted.map((src) => {
+          const ok = succeeded.has(src);
+          const skip = skipped.has(src);
+          const color = ok ? "#0c5" : skip ? "#cc3" : "#a22";
+          const label = ok ? "✓" : skip ? "skipped" : "failed";
+          return (
+            <span key={src} style={{
+              padding: "2px 8px",
+              borderRadius: 4,
+              background: "#161a20",
+              border: `1px solid ${color}`,
+              color,
+            }}>
+              {src} · {label}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -36,7 +36,10 @@ RETURNING id, source, correlation_id, started_at, finished_at, status,
           device_count, ap_count, cpe_count, bridge_count, link_count,
           router_count, switch_count, unknown_count, low_conf_count,
           COALESCE(error_code,''), COALESCE(error_message,''),
-          commands_run, triggered_by, created_at`,
+          commands_run, triggered_by, created_at,
+          enrichment_sources_attempted, enrichment_sources_succeeded,
+          enrichment_sources_skipped, enrichment_duration_ms,
+          with_mac_count, with_host_count, enriched_count`,
 		correlationID, triggeredBy)
 	return scanRun(row)
 }
@@ -64,13 +67,16 @@ func ComputeRunStatus(success bool, errorCode string, deviceCount int) string {
 }
 
 // FinalizeRun updates the run with terminal state + counters using
-// the ComputeRunStatus invariant.
+// the ComputeRunStatus invariant. Phase 8.1 also persists enrichment
+// source attempt/success/skip lists and the wall-clock spent on
+// enrichment.
 func (r *Repository) FinalizeRun(ctx context.Context, runID string, res dude.RunResult) error {
 	status := ComputeRunStatus(res.Success, res.ErrorCode, len(res.Devices))
 	cmds := res.CommandsRun
 	if cmds == nil {
 		cmds = []string{}
 	}
+	attempted, succeeded, skipped := splitSourceStatuses(res.Sources)
 	_, err := r.P.Exec(ctx, `
 UPDATE discovery_runs
 SET finished_at = now(),
@@ -80,14 +86,41 @@ SET finished_at = now(),
     low_conf_count = $11,
     error_code = NULLIF($12,''),
     error_message = NULLIF($13,''),
-    commands_run = $14
+    commands_run = $14,
+    enrichment_sources_attempted = $15,
+    enrichment_sources_succeeded = $16,
+    enrichment_sources_skipped   = $17,
+    enrichment_duration_ms       = $18,
+    with_mac_count               = $19,
+    with_host_count              = $20,
+    enriched_count               = $21
 WHERE id = $1`,
 		runID, status,
 		res.Stats.Total, res.Stats.APs, res.Stats.CPEs, res.Stats.Bridges,
 		res.Stats.BackhaulLinks, res.Stats.Routers, res.Stats.Switches,
 		res.Stats.Unknown, res.Stats.LowConfidence,
-		res.ErrorCode, res.Error, cmds)
+		res.ErrorCode, res.Error, cmds,
+		attempted, succeeded, skipped, res.EnrichmentMS,
+		res.Stats.WithMAC, res.Stats.WithHost, res.Stats.EnrichedCount)
 	return err
+}
+
+// splitSourceStatuses turns the per-source status slice into three
+// `text[]` columns suitable for UPDATE.
+func splitSourceStatuses(srcs []dude.SourceStatus) (attempted, succeeded, skipped []string) {
+	attempted = []string{}
+	succeeded = []string{}
+	skipped = []string{}
+	for _, s := range srcs {
+		attempted = append(attempted, s.Source)
+		switch s.Status {
+		case "succeeded":
+			succeeded = append(succeeded, s.Source)
+		case "skipped_unsupported", "skipped_empty":
+			skipped = append(skipped, s.Source)
+		}
+	}
+	return
 }
 
 // ListRuns returns the most recent runs (newest first).
@@ -100,7 +133,10 @@ SELECT id, source, correlation_id, started_at, finished_at, status,
        device_count, ap_count, cpe_count, bridge_count, link_count,
        router_count, switch_count, unknown_count, low_conf_count,
        COALESCE(error_code,''), COALESCE(error_message,''),
-       commands_run, triggered_by, created_at
+       commands_run, triggered_by, created_at,
+       enrichment_sources_attempted, enrichment_sources_succeeded,
+       enrichment_sources_skipped, enrichment_duration_ms,
+       with_mac_count, with_host_count, enriched_count
 FROM discovery_runs
 ORDER BY started_at DESC
 LIMIT $1`, limit)
@@ -126,7 +162,10 @@ SELECT id, source, correlation_id, started_at, finished_at, status,
        device_count, ap_count, cpe_count, bridge_count, link_count,
        router_count, switch_count, unknown_count, low_conf_count,
        COALESCE(error_code,''), COALESCE(error_message,''),
-       commands_run, triggered_by, created_at
+       commands_run, triggered_by, created_at,
+       enrichment_sources_attempted, enrichment_sources_succeeded,
+       enrichment_sources_skipped, enrichment_duration_ms,
+       with_mac_count, with_host_count, enriched_count
 FROM discovery_runs
 ORDER BY started_at DESC
 LIMIT 1`)
@@ -244,21 +283,36 @@ func upsertOneDevice(ctx context.Context, tx pgx.Tx, d dude.DiscoveredDevice, ho
 		return "", false, errors.New("no stable identity")
 	}
 
+	var enrichedAt any
+	if !d.EnrichedAt.IsZero() {
+		enrichedAt = d.EnrichedAt
+	}
+	sources := d.Sources
+	if sources == nil {
+		sources = []string{}
+	}
+
 	var id string
 	var inserted bool
 	err := tx.QueryRow(ctx, sqlText,
-		nullIfEmpty(host),           // $1 host
-		name,                        // $2 name
-		nullIfEmpty(mac),            // $3 mac
-		nullIfEmpty(d.Model),        // $4 model
-		nullIfEmpty(d.OSVersion),    // $5 os_version
-		nullIfEmpty(d.Identity),     // $6 identity
-		nullIfEmpty(d.Type),         // $7 device_type
-		category,                    // $8 category
-		d.Classification.Confidence, // $9 confidence
-		status,                      // $10 status
-		d.LastSeen,                  // $11 last_seen_at
-		string(raw),                 // $12 raw_metadata
+		nullIfEmpty(host),            // $1 host
+		name,                         // $2 name
+		nullIfEmpty(mac),             // $3 mac
+		nullIfEmpty(d.Model),         // $4 model
+		nullIfEmpty(d.OSVersion),     // $5 os_version
+		nullIfEmpty(d.Identity),      // $6 identity
+		nullIfEmpty(d.Type),          // $7 device_type
+		category,                     // $8 category
+		d.Classification.Confidence,  // $9 confidence
+		status,                       // $10 status
+		d.LastSeen,                   // $11 last_seen_at
+		string(raw),                  // $12 raw_metadata
+		nullIfEmpty(d.Platform),      // $13 platform
+		nullIfEmpty(d.Board),         // $14 board
+		nullIfEmpty(d.InterfaceName), // $15 interface_name
+		d.EvidenceSummary,            // $16 evidence_summary
+		sources,                      // $17 enrichment_sources
+		enrichedAt,                   // $18 last_enriched_at
 	).Scan(&id, &inserted)
 	return id, inserted, err
 }
@@ -270,9 +324,12 @@ func upsertOneDevice(ctx context.Context, tx pgx.Tx, d dude.DiscoveredDevice, ho
 const sqlUpsertDeviceCommonValues = `
 INSERT INTO network_devices
 (source, host, name, mac, model, os_version, identity, device_type,
- category, confidence, status, last_seen_at, raw_metadata)
+ category, confidence, status, last_seen_at, raw_metadata,
+ platform, board, interface_name, evidence_summary,
+ enrichment_sources, last_enriched_at)
 VALUES ('mikrotik_dude', $1::inet, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12::jsonb)
+        $8, $9, $10, $11, $12::jsonb,
+        $13, $14, $15, $16, $17, $18)
 `
 
 const sqlUpsertDeviceCommonUpdate = `
@@ -289,6 +346,12 @@ DO UPDATE SET
   status = EXCLUDED.status,
   raw_metadata = EXCLUDED.raw_metadata,
   last_seen_at = EXCLUDED.last_seen_at,
+  platform = COALESCE(EXCLUDED.platform, network_devices.platform),
+  board = COALESCE(EXCLUDED.board, network_devices.board),
+  interface_name = COALESCE(EXCLUDED.interface_name, network_devices.interface_name),
+  evidence_summary = CASE WHEN EXCLUDED.evidence_summary <> '' THEN EXCLUDED.evidence_summary ELSE network_devices.evidence_summary END,
+  enrichment_sources = CASE WHEN array_length(EXCLUDED.enrichment_sources,1) IS NOT NULL THEN EXCLUDED.enrichment_sources ELSE network_devices.enrichment_sources END,
+  last_enriched_at = COALESCE(EXCLUDED.last_enriched_at, network_devices.last_enriched_at),
   updated_at = now()
 RETURNING id, (xmax = 0) AS inserted
 `
@@ -342,18 +405,31 @@ func (r *Repository) ListDevices(ctx context.Context, f Filter) ([]Device, error
 		args = append(args, f.Status)
 		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
 	}
+	if f.Source != "" {
+		args = append(args, f.Source)
+		conds = append(conds, fmt.Sprintf("source = $%d", len(args)))
+	}
 	if f.OnlyLowConf {
 		conds = append(conds, "confidence < 50")
 	}
 	if f.OnlyUnknown {
 		conds = append(conds, "category = 'Unknown'")
 	}
+	if f.OnlyHasMAC {
+		conds = append(conds, "mac IS NOT NULL")
+	}
+	if f.OnlyEnriched {
+		conds = append(conds, "last_enriched_at IS NOT NULL")
+	}
 
 	q := fmt.Sprintf(`
 SELECT id, source, COALESCE(host(host),''), name, COALESCE(mac,''),
        COALESCE(model,''), COALESCE(os_version,''), COALESCE(identity,''),
        COALESCE(device_type,''), category, confidence, status,
-       last_seen_at, first_seen_at, raw_metadata, created_at, updated_at
+       last_seen_at, first_seen_at, raw_metadata, created_at, updated_at,
+       COALESCE(platform,''), COALESCE(board,''), COALESCE(interface_name,''),
+       COALESCE(evidence_summary,''), COALESCE(enrichment_sources, '{}'::text[]),
+       last_enriched_at
 FROM network_devices
 WHERE %s
 ORDER BY last_seen_at DESC
@@ -369,16 +445,21 @@ LIMIT $1 OFFSET $2`, strings.Join(conds, " AND "))
 		var d Device
 		var raw []byte
 		var category string
+		var enrichedAt *time.Time
 		if err := rows.Scan(&d.ID, &d.Source, &d.Host, &d.Name, &d.MAC,
 			&d.Model, &d.OSVersion, &d.Identity, &d.DeviceType,
 			&category, &d.Confidence, &d.Status,
-			&d.LastSeenAt, &d.FirstSeenAt, &raw, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.LastSeenAt, &d.FirstSeenAt, &raw, &d.CreatedAt, &d.UpdatedAt,
+			&d.Platform, &d.Board, &d.InterfaceName,
+			&d.EvidenceSummary, &d.EnrichmentSources,
+			&enrichedAt); err != nil {
 			return nil, err
 		}
 		d.Category = dude.Category(category)
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &d.RawMetadata)
 		}
+		d.LastEnrichedAt = enrichedAt
 		out = append(out, d)
 	}
 	return out, rows.Err()
@@ -390,15 +471,22 @@ func (r *Repository) GetDevice(ctx context.Context, id string) (*Device, error) 
 SELECT id, source, COALESCE(host(host),''), name, COALESCE(mac,''),
        COALESCE(model,''), COALESCE(os_version,''), COALESCE(identity,''),
        COALESCE(device_type,''), category, confidence, status,
-       last_seen_at, first_seen_at, raw_metadata, created_at, updated_at
+       last_seen_at, first_seen_at, raw_metadata, created_at, updated_at,
+       COALESCE(platform,''), COALESCE(board,''), COALESCE(interface_name,''),
+       COALESCE(evidence_summary,''), COALESCE(enrichment_sources, '{}'::text[]),
+       last_enriched_at
 FROM network_devices WHERE id = $1`, id)
 	var d Device
 	var raw []byte
 	var category string
+	var enrichedAt *time.Time
 	if err := row.Scan(&d.ID, &d.Source, &d.Host, &d.Name, &d.MAC,
 		&d.Model, &d.OSVersion, &d.Identity, &d.DeviceType,
 		&category, &d.Confidence, &d.Status,
-		&d.LastSeenAt, &d.FirstSeenAt, &raw, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		&d.LastSeenAt, &d.FirstSeenAt, &raw, &d.CreatedAt, &d.UpdatedAt,
+		&d.Platform, &d.Board, &d.InterfaceName,
+		&d.EvidenceSummary, &d.EnrichmentSources,
+		&enrichedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -408,6 +496,7 @@ FROM network_devices WHERE id = $1`, id)
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &d.RawMetadata)
 	}
+	d.LastEnrichedAt = enrichedAt
 	return &d, nil
 }
 
@@ -419,17 +508,32 @@ func scanRun(row pgx.Row) (*Run, error) {
 	var v Run
 	var finished *time.Time
 	var commands []string
+	var attempted, succeeded, skipped []string
 	if err := row.Scan(&v.ID, &v.Source, &v.CorrelationID, &v.StartedAt,
 		&finished, &v.Status, &v.DeviceCount, &v.APCount, &v.CPECount,
 		&v.BridgeCount, &v.LinkCount, &v.RouterCount, &v.SwitchCount,
 		&v.UnknownCount, &v.LowConfCount,
-		&v.ErrorCode, &v.ErrorMessage, &commands, &v.TriggeredBy, &v.CreatedAt); err != nil {
+		&v.ErrorCode, &v.ErrorMessage, &commands, &v.TriggeredBy, &v.CreatedAt,
+		&attempted, &succeeded, &skipped, &v.EnrichmentDurationMS,
+		&v.WithMACCount, &v.WithHostCount, &v.EnrichedCount); err != nil {
 		return nil, err
 	}
 	v.FinishedAt = finished
 	v.CommandsRun = commands
 	if v.CommandsRun == nil {
 		v.CommandsRun = []string{}
+	}
+	v.EnrichmentSourcesAttempted = attempted
+	v.EnrichmentSourcesSucceeded = succeeded
+	v.EnrichmentSourcesSkipped = skipped
+	if v.EnrichmentSourcesAttempted == nil {
+		v.EnrichmentSourcesAttempted = []string{}
+	}
+	if v.EnrichmentSourcesSucceeded == nil {
+		v.EnrichmentSourcesSucceeded = []string{}
+	}
+	if v.EnrichmentSourcesSkipped == nil {
+		v.EnrichmentSourcesSkipped = []string{}
 	}
 	return &v, nil
 }
