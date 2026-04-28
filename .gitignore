@@ -35,3 +35,6 @@ apps/web/tsconfig.tsbuildinfo
 /worker
 *-go-tmp-*
 
+# lokal smoke harness artifacts (binary + log dosyaları, asla commit edilmez)
+.smoke_*
+
