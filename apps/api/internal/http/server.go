@@ -49,6 +49,9 @@ type Server struct {
 	netActions    *networkactions.Registry
 	dudeRunMu     sync.Mutex // serialize discovery runs (one at a time)
 	dudeRunActive bool       // true while a run is in flight
+
+	// Phase 9 — read-only network action framework + frequency_check
+	actionRepo *networkactions.Repository
 }
 
 // New returns a configured HTTP server.
@@ -87,10 +90,16 @@ func New(cfg *config.Config, db *database.Pool, log *slog.Logger) *Server {
 		mikrotik.SetGlobalKnownHostsStore(&scheduler.SSHKnownHostsStore{P: db.P})
 		// Faz 8: ağ envanteri repository + action framework iskeleti.
 		s.netInv = networkinv.NewRepository(db.P)
+		// Faz 9: action repository (network_action_runs).
+		s.actionRepo = networkactions.NewRepository(db.P)
 	} else {
 		s.auditor = audit.NewMemorySink()
 	}
 	// Action registry her durumda hazır (DB olmasa bile UI'a 503 döneriz).
+	// Faz 9: real FrequencyCheckAction handler tarafında per-request
+	// inşa edilir (Target alanı request'e göre değişir); registry stub
+	// olarak kalır ve "is this action surface known?" sorusuna cevap
+	// verir. Destructive actions (frequency_correction vs.) hala stub.
 	s.netActions = networkactions.NewRegistry()
 
 	mux := http.NewServeMux()

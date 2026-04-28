@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   api,
   ApiError,
@@ -292,6 +293,7 @@ export function NetworkInventoryClient() {
               <th>Platform</th>
               <th>Durum</th>
               <th>Son Görüldü</th>
+              <th>Aksiyon</th>
             </tr>
           </thead>
           <tbody>
@@ -326,11 +328,70 @@ export function NetworkInventoryClient() {
                 </td>
                 <td>{d.status}</td>
                 <td style={{ fontSize: 12 }}>{new Date(d.last_seen_at).toLocaleString("tr-TR")}</td>
+                <td>
+                  <FrequencyCheckButton device={d} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+    </div>
+  );
+}
+
+function FrequencyCheckButton({ device }: { device: NetworkDevice }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submittedRunId, setSubmittedRunId] = useState<string | null>(null);
+
+  const canRun = !!device.host;
+
+  async function startFreqCheck() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await api.post<{ run_id: string; status: string }>(
+        "/api/v1/network/actions/frequency-check",
+        { target_device_id: device.id }
+      );
+      setSubmittedRunId(res.run_id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (submittedRunId) {
+    return (
+      <Link href="/aksiyonlar" style={{ fontSize: 11, color: "#36c" }}>
+        Çalıştırıldı → /aksiyonlar
+      </Link>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <button
+        type="button"
+        disabled={!canRun || submitting}
+        onClick={startFreqCheck}
+        title={canRun ? "Read-only frekans kontrolü başlat" : "Cihaz IP'si yok, kontrol başlatılamaz"}
+        style={{
+          fontSize: 11,
+          padding: "2px 8px",
+          background: canRun ? "#1d6" : "#444",
+          color: "#fff",
+          border: "none",
+          borderRadius: 3,
+          cursor: canRun && !submitting ? "pointer" : "default",
+          opacity: canRun ? 1 : 0.6,
+        }}
+      >
+        {submitting ? "Başlatılıyor…" : "Frekans Kontrol"}
+      </button>
+      {error ? <span style={{ fontSize: 10, color: "#fa3" }}>{error}</span> : null}
     </div>
   );
 }

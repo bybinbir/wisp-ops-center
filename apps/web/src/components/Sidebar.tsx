@@ -13,6 +13,7 @@ const NAV: { href: string; label: string }[] = [
   { href: "/ap-client-tests", label: "AP → Client Testleri" },
   { href: "/is-emirleri", label: "İş Emirleri" },
   { href: "/ag-envanteri", label: "Ağ Envanteri" },
+  { href: "/aksiyonlar", label: "Ağ Aksiyonları" },
   { href: "/ayarlar", label: "Ayarlar" }
 ];
 
@@ -21,7 +22,7 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-brand">
         WISP Ops Center
-        <small>Faz 8 · ağ envanteri</small>
+        <small>Faz 9 · ağ aksiyonları (read-only)</small>
       </div>
       {NAV.map((item) => (
         <Link key={item.href} href={item.href} className="sidebar-link">

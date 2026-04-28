@@ -71,6 +71,11 @@ type Request struct {
 
 // Result is the action's terminal state, recorded into the audit
 // log. The shape is stable so later phases can reuse it.
+//
+// Phase 9 added Result.Result (yes — a map under that name) so
+// concrete actions can attach a structured payload that the API +
+// audit layer can serialize without coupling either to the action
+// implementation.
 type Result struct {
 	Kind          Kind
 	DeviceID      string
@@ -81,6 +86,9 @@ type Result struct {
 	DryRun        bool
 	ErrorCode     string
 	Message       string
+	// Result is the structured payload (e.g. FrequencyCheckResult +
+	// the per-source command list). Sanitized before persistence.
+	Result map[string]any
 }
 
 // MaintenanceWindow is a [start, end) interval during which an
