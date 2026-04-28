@@ -6,22 +6,26 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2**
-- ▣ Active: **Phase 9 v3 — Credential resolver + target_host validation + Phase 10 pre-gate** (branch `phase/009-v3-hardening-credential-target-validation`; PR pending)
-- ☐ Remaining: **Phase 10 — frequency_correction (DESTRUCTIVE, gated by Phase 10 pre-gate)**
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3**
+- ▣ Active: **Phase 10A — Destructive safety foundation** (branch `phase/010a-destructive-safety-foundation`; PR pending; **no destructive execution enabled**)
+- ☐ Remaining: **Phase 10 — frequency_correction (DESTRUCTIVE, gated by Phase 10A pre-gate + Postgres-backed providers)**
 
-### Phase 10 preconditions (enforced by `internal/networkactions/phase10_pregate.go`)
+### Phase 10 preconditions (handed forward by Phase 10A)
 
-The master switch `DestructiveActionEnabled = false` in Phase 9 v3 keeps every destructive Kind blocked. Phase 10 may flip it only after ALL of the following land:
+Phase 10A landed the **interface scaffolding** for the destructive gate. The legacy global `DestructiveActionEnabled = false` is still false; the new `DestructiveProviders` path also defaults closed (`MemoryToggle.Enabled() = false`). Phase 10 must satisfy in order:
 
-- ☐ Operator-controlled runtime toggle (config + audit-logged flip).
-- ☐ RBAC store with real role lookup (today: constant `AllowedRolesForDestructive`).
-- ☐ Maintenance window CRUD + verification at action create-time AND start-time.
-- ☐ Rollback metadata column/jsonb + API surface.
+- ☑ Operator-controlled runtime toggle abstraction (`DestructiveToggle` interface + `MemoryToggle`; flip requires actor + reason; `network_action_toggle_flips` table ready).
+- ☑ RBAC resolver abstraction (`RBACResolver` + `Capability` + `StaticRoleResolver` with capability mapping for `net_admin/net_ops/net_viewer`).
+- ☑ Maintenance window domain model (`MaintenanceRecord` + `MaintenanceProvider`/`MaintenanceStore` + `ValidateMaintenanceRecord` + `MemoryMaintenanceStore` + `network_action_maintenance_windows` table ready).
+- ☑ Audit event catalog (`DestructiveAuditCatalog` with 7 stable event names + `AuditActionForGateError` mapper).
+- ☑ Phase 10A migration 000011 (idempotent, transactional, no DROP, 3× replay proven).
+- ☐ Postgres-backed `DestructiveToggle` writing to `network_action_toggle_flips`.
+- ☐ Postgres-backed `RBACResolver` (real role store).
+- ☐ Postgres-backed `MaintenanceStore` (CRUD endpoints + DB persistence).
+- ☐ API endpoints: list/declare window, flip toggle (only `CapabilityToggleFlip`), pre-flight check exposing `PreGateChecklist`.
 - ☐ Idempotency key DB-level uniqueness (per device + action_type + intent).
-- ☐ Audit event coverage for confirm/gate-fail/dry-run/live-start/rollback.
-- ☐ Per-device lock + rate limit end-to-end re-verified.
-- ☐ Allowlist deny-list regression test pinned (write paths still blocked AFTER frequency_correction lands).
+- ☐ `runActionAsync` for destructive Kinds emitting full audit lifecycle (confirmed/gate_fail/dry_run/live_start_blocked).
+- ☐ End-to-end smoke proving closed toggle → denied; open toggle + missing window → denied; full happy → only explicit operator-confirmed write set.
 
 ### Hardening backlog (still non-blocking)
 

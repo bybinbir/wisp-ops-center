@@ -32,6 +32,10 @@ var (
 	ErrRollbackNoteMissing      = errors.New("networkactions: rollback_note_missing")
 	ErrRBACDenied               = errors.New("networkactions: rbac_denied")
 	ErrIdempotencyKeyMissing    = errors.New("networkactions: idempotency_key_missing")
+	// Phase 10A — provider-level failures.
+	ErrToggleProviderRequired = errors.New("networkactions: toggle_provider_required")
+	ErrRBACProviderRequired   = errors.New("networkactions: rbac_provider_required")
+	ErrWindowProviderRequired = errors.New("networkactions: window_provider_required")
 )
 
 // DestructiveRequest is the input shape Phase 10 callers will use.
@@ -102,6 +106,89 @@ func EnsureDestructiveAllowed(ctx context.Context, req DestructiveRequest) error
 	}
 	// 7. Idempotency key required so a duplicate POST cannot
 	//    re-execute the same destructive intent.
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return ErrIdempotencyKeyMissing
+	}
+	return nil
+}
+
+// DestructiveProviders bundles the operator-controlled stores the
+// Phase 10A pre-gate consults. Pass concrete implementations
+// (MemoryToggle, StaticRoleResolver, MemoryMaintenanceStore) for
+// hermetic tests; production wires Postgres-backed equivalents.
+//
+// Every field is required for live execution. The gate
+// fail-closes when any field is nil.
+type DestructiveProviders struct {
+	Toggle      DestructiveToggle
+	RBAC        RBACResolver
+	Maintenance MaintenanceProvider
+}
+
+// EnsureDestructiveAllowedWithProviders is the Phase 10A successor
+// to EnsureDestructiveAllowed. It performs the same guardrails but
+// reads each invariant from an explicit provider, never from
+// process-global state. The legacy helper is preserved for
+// backward-compat with Phase 9 tests.
+//
+// Order (each step returns the FIRST failing typed error):
+//
+//  1. providers != nil
+//  2. Toggle.Enabled == true                                (master switch)
+//  3. Kind.IsDestructive()                                  (non-destructive bypass)
+//  4. RBAC: principal holds CapabilityDestructiveExecute    (RBAC)
+//  5. req.Confirm == true                                   (explicit intent)
+//  6. Maintenance.ActiveAt returns >=1 window               (maintenance window)
+//  7. RollbackNote non-empty                                (rollback)
+//  8. IdempotencyKey non-empty                              (idempotency)
+//
+// dry_run requests still flow through this gate; callers MUST
+// continue to set DryRun=true unless every guardrail returns nil.
+func EnsureDestructiveAllowedWithProviders(
+	ctx context.Context,
+	providers *DestructiveProviders,
+	req DestructiveRequest,
+) error {
+	if providers == nil {
+		return ErrToggleProviderRequired
+	}
+	if providers.Toggle == nil {
+		return ErrToggleProviderRequired
+	}
+	enabled, err := providers.Toggle.Enabled(ctx)
+	if err != nil || !enabled {
+		return ErrDestructiveDisabled
+	}
+	if !req.Kind.IsDestructive() {
+		return nil
+	}
+	if providers.RBAC == nil {
+		return ErrRBACProviderRequired
+	}
+	principal := Principal{Actor: req.Actor, Roles: req.ActorRoles}
+	if !HasCapability(ctx, providers.RBAC, principal, CapabilityDestructiveExecute) {
+		return ErrRBACDenied
+	}
+	if !req.Confirm {
+		return ErrIntentNotConfirmed
+	}
+	if providers.Maintenance == nil {
+		return ErrWindowProviderRequired
+	}
+	now := req.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	wins, werr := providers.Maintenance.ActiveAt(ctx, req.DeviceID, now)
+	if werr != nil {
+		return ErrMaintenanceWindowMissing
+	}
+	if len(wins) == 0 {
+		return ErrMaintenanceWindowClosed
+	}
+	if strings.TrimSpace(req.RollbackNote) == "" {
+		return ErrRollbackNoteMissing
+	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return ErrIdempotencyKeyMissing
 	}
