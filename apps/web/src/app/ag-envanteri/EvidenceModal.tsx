@@ -176,6 +176,15 @@ function DeviceHeader({ d }: { d: DeviceEvidence }) {
 function Why({ d }: { d: DeviceEvidence }) {
   const s = d.evidence_summary;
   const cat = d.device.category;
+  const conf = d.device.confidence;
+  // Phase R2 — strong/weak/unknown bucket ayrımı.
+  const tier: "strong" | "weak" | "unknown" =
+    cat === "Unknown" || conf === 0
+      ? "unknown"
+      : conf > 50
+        ? "strong"
+        : "weak";
+  const weakRow = d.evidence.find((e) => e.heuristic === "weak_name_pattern");
   const operatorBlurb =
     cat === "Unknown"
       ? `Bu cihaz Bilinmeyen, çünkü hiçbir kanıt eşiği aşmadı (en yüksek ağırlık: ${s.winner} = ${s.winner_weight}).`
@@ -183,6 +192,22 @@ function Why({ d }: { d: DeviceEvidence }) {
   return (
     <section style={{ marginTop: 12 }}>
       <h3 style={{ margin: 0, fontSize: 14 }}>Neden bu kategori?</h3>
+      <ConfidenceTierBadge tier={tier} confidence={conf} />
+      {weakRow && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: 8,
+            background: "#241c0e",
+            border: "1px solid #443018",
+            borderRadius: 4,
+            fontSize: 12,
+            color: "#fda",
+          }}
+        >
+          <strong>Zayıf isim sınıflandırması</strong> — {weakRow.reason}
+        </div>
+      )}
       <div style={{ marginTop: 6, fontSize: 13 }}>{operatorBlurb}</div>
       <div style={{ marginTop: 6, fontSize: 12, color: "#9aa1aa" }}>
         Toplam kanıt satırı: {s.total_rows} · benzersiz heuristic:{" "}
@@ -200,6 +225,38 @@ function Why({ d }: { d: DeviceEvidence }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ConfidenceTierBadge({
+  tier,
+  confidence,
+}: {
+  tier: "strong" | "weak" | "unknown";
+  confidence: number;
+}) {
+  const map = {
+    strong: { label: "Güçlü Sınıflandırma", bg: "#0c5", fg: "#fff" },
+    weak:   { label: "Zayıf Sınıflandırma", bg: "#cc3", fg: "#000" },
+    unknown:{ label: "Bilinmeyen",          bg: "#a22", fg: "#fff" },
+  } as const;
+  const m = map[tier];
+  return (
+    <div style={{ marginTop: 6, fontSize: 12, color: "#9aa1aa" }}>
+      Sınıflandırma katmanı:{" "}
+      <span
+        style={{
+          padding: "1px 8px",
+          borderRadius: 3,
+          background: m.bg,
+          color: m.fg,
+          marginLeft: 4,
+        }}
+      >
+        {m.label}
+      </span>{" "}
+      · confidence {confidence}
+    </div>
   );
 }
 

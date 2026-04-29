@@ -47,12 +47,38 @@ type opsPanelResponse struct {
 }
 
 type opsDiscovery struct {
-	Configured              bool         `json:"configured"`
-	LastRun                 *opsRunBrief `json:"last_run,omitempty"`
-	LastRunFinishedSecsAgo  *int64       `json:"last_run_finished_seconds_ago,omitempty"`
-	Totals                  opsInvTotals `json:"totals"`
-	UnknownPercentage       float64      `json:"unknown_percentage"`
-	LowConfidencePercentage float64      `json:"low_confidence_percentage"`
+	Configured              bool                      `json:"configured"`
+	LastRun                 *opsRunBrief              `json:"last_run,omitempty"`
+	LastRunFinishedSecsAgo  *int64                    `json:"last_run_finished_seconds_ago,omitempty"`
+	Totals                  opsInvTotals              `json:"totals"`
+	UnknownPercentage       float64                   `json:"unknown_percentage"`
+	LowConfidencePercentage float64                   `json:"low_confidence_percentage"`
+	Classification          opsClassificationProgress `json:"classification"`
+}
+
+// Phase R2 — strong/weak/unknown sınıflandırma kovaları.
+//   - strong : confidence > 50 ve category != Unknown
+//   - weak   : confidence 1-50 ve category != Unknown
+//     (weak_name_pattern OR low-confidence primary name hint)
+//   - unknown: category == Unknown (confidence == 0 in our model)
+//
+// WeakByPattern field özellikle device_category_evidence üzerinde
+// 'weak_name_pattern' heuristic taşıyan cihaz sayısını verir; bu
+// R2 fallback'inin yatkınlığını ölçer.
+//
+// TargetUnknownPercentage = R2 hedefi. NonUnknownPercentage o
+// hedefe karşı progress göstergesi olarak dashboard'da görünür.
+type opsClassificationProgress struct {
+	Total                  int     `json:"total"`
+	Strong                 int     `json:"strong"`
+	Weak                   int     `json:"weak"`
+	WeakByPattern          int     `json:"weak_by_pattern"`
+	Unknown                int     `json:"unknown"`
+	StrongPercentage       float64 `json:"strong_percentage"`
+	WeakPercentage         float64 `json:"weak_percentage"`
+	NonUnknownPercentage   float64 `json:"non_unknown_percentage"`
+	TargetUnknownMaxPct    float64 `json:"target_unknown_max_percentage"`
+	TargetNonUnknownMinPct float64 `json:"target_non_unknown_min_percentage"`
 }
 
 type opsRunBrief struct {
@@ -205,6 +231,13 @@ func (s *Server) handleOperationsPanel(w http.ResponseWriter, r *http.Request) {
 				resp.Discovery.UnknownPercentage = round1(float64(totals.Unknown) * 100 / float64(totals.Total))
 				resp.Discovery.LowConfidencePercentage = round1(float64(totals.LowConfidence) * 100 / float64(totals.Total))
 			}
+			// Phase R2 — strong/weak/unknown sınıflandırma ilerlemesi.
+			cp, cerr := s.opsPanelClassificationProgress(ctx, totals)
+			if cerr == nil {
+				resp.Discovery.Classification = cp
+			} else {
+				s.maybeWarn("ops_panel_classification", cerr)
+			}
 		} else {
 			s.maybeWarn("ops_panel_inv_totals", terr)
 		}
@@ -278,6 +311,63 @@ func (s *Server) handleOperationsPanel(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// opsPanelClassificationProgress collapses the device set into
+// strong / weak / unknown buckets driven by the persisted
+// `confidence` column on `network_devices`. Strong = confidence>50,
+// Weak = 1..50 (any non-zero score), Unknown = 0 OR
+// category='Unknown'. WeakByPattern is the count of devices whose
+// device_category_evidence trail contains a row with
+// heuristic='weak_name_pattern' — the R2 fallback's reach.
+//
+// The R2 dashboard target lives here as a constant pair so the
+// frontend doesn't drift: at least 70% of discovered devices should
+// land in a non-Unknown bucket; equivalently Unknown <= 30%.
+func (s *Server) opsPanelClassificationProgress(
+	ctx context.Context, totals opsInvTotals,
+) (opsClassificationProgress, error) {
+	const (
+		targetUnknownMaxPct    = 30.0
+		targetNonUnknownMinPct = 70.0
+	)
+	out := opsClassificationProgress{
+		Total:                  totals.Total,
+		TargetUnknownMaxPct:    targetUnknownMaxPct,
+		TargetNonUnknownMinPct: targetNonUnknownMinPct,
+	}
+	if totals.Total == 0 {
+		return out, nil
+	}
+
+	const q = `
+SELECT
+  COUNT(*) FILTER (WHERE category != 'Unknown' AND confidence > 50)                 AS strong,
+  COUNT(*) FILTER (WHERE category != 'Unknown' AND confidence BETWEEN 1 AND 50)     AS weak,
+  COUNT(*) FILTER (WHERE category = 'Unknown' OR confidence = 0)                    AS unknown
+FROM network_devices`
+	if err := s.db.P.QueryRow(ctx, q).Scan(&out.Strong, &out.Weak, &out.Unknown); err != nil {
+		return out, err
+	}
+
+	// Weak-by-pattern: cihaz sayısını device_category_evidence üzerinden say.
+	// DISTINCT device_id gerek — bir cihaz birden fazla weak satırı taşıyabilir
+	// (gelecek tier'lar için).
+	const qByPattern = `
+SELECT COUNT(DISTINCT device_id)
+FROM device_category_evidence
+WHERE heuristic = 'weak_name_pattern'`
+	if err := s.db.P.QueryRow(ctx, qByPattern).Scan(&out.WeakByPattern); err != nil {
+		// non-fatal: weak-by-pattern is informational, not safety-critical.
+		out.WeakByPattern = 0
+	}
+
+	totalF := float64(out.Total)
+	out.StrongPercentage = round1(float64(out.Strong) * 100 / totalF)
+	out.WeakPercentage = round1(float64(out.Weak) * 100 / totalF)
+	nonUnk := out.Strong + out.Weak
+	out.NonUnknownPercentage = round1(float64(nonUnk) * 100 / totalF)
+	return out, nil
 }
 
 // opsPanelInventoryTotals runs one aggregation query against

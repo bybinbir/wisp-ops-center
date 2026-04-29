@@ -225,6 +225,12 @@ func Classify(d *DiscoveredDevice) {
 		Confidence: bestScore,
 		Evidences:  ev,
 	}
+
+	// Phase R2 — weak_name_pattern fallback. Runs ONLY when the
+	// strong tier above committed to Unknown. Confidence is capped
+	// at 50 inside applyWeakNamePattern; ambiguous matches stay
+	// Unknown. Strong evidence always overrides weak.
+	applyWeakNamePattern(d)
 }
 
 func containsAny(s string, needles ...string) bool {

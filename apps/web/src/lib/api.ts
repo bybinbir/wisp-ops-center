@@ -725,6 +725,26 @@ export type OpsDataInsufficient = {
   hint?: string;
 };
 
+// Phase R2 — sınıflandırma ilerleme durumu.
+//   strong  : confidence > 50 ve category != Unknown
+//   weak    : confidence 1-50 ve category != Unknown
+//   unknown : category == Unknown veya confidence == 0
+//   weak_by_pattern: device_category_evidence içinde
+//                    heuristic='weak_name_pattern' satırı taşıyan
+//                    cihaz sayısı (R2 fallback yatkınlığı).
+export type OpsClassificationProgress = {
+  total: number;
+  strong: number;
+  weak: number;
+  weak_by_pattern: number;
+  unknown: number;
+  strong_percentage: number;
+  weak_percentage: number;
+  non_unknown_percentage: number;
+  target_unknown_max_percentage: number;
+  target_non_unknown_min_percentage: number;
+};
+
 export type OperationsPanel = {
   generated_at: string;
   discovery: {
@@ -734,6 +754,7 @@ export type OperationsPanel = {
     totals: OpsInvTotals;
     unknown_percentage: number;
     low_confidence_percentage: number;
+    classification: OpsClassificationProgress;
   };
   actions: {
     last_24h: OpsActionWindow;

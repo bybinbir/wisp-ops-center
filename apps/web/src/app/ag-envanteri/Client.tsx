@@ -332,11 +332,7 @@ export function NetworkInventoryClient() {
                     {CATEGORY_LABELS[d.category]}
                   </span>
                 </td>
-                <td>
-                  <span style={{
-                    color: d.confidence < 50 ? "#fa3" : d.confidence < 80 ? "#cc3" : "#0c5",
-                  }}>{d.confidence}</span>
-                </td>
+                <td><ConfidenceCell d={d} /></td>
                 <td style={{ fontSize: 11, color: "#aaa" }}>
                   {d.evidence_summary || "—"}
                 </td>
@@ -534,4 +530,49 @@ function badgeColor(c: NetworkCategory): string {
     case "Switch": return "#444";
     default: return "#555";
   }
+}
+
+
+// Phase R2 — sınıflandırma katmanı çipi.
+// Operatör için 3 kova:
+//   strong  : confidence > 50  (yeşil "güçlü güven")
+//   weak    : confidence 1-50  (sarı "zayıf güven", weak_name_pattern
+//             veya düşük puanlı primary name hint)
+//   unknown : Unknown veya confidence 0  (kırmızı "düşük güven")
+function ConfidenceCell({ d }: { d: NetworkDevice }) {
+  const isUnknown = d.category === "Unknown" || d.confidence === 0;
+  const isStrong = !isUnknown && d.confidence > 50;
+  const isWeak = !isUnknown && !isStrong;
+  const tierLabel = isUnknown
+    ? "düşük güven"
+    : isStrong
+      ? "güçlü güven"
+      : "zayıf güven";
+  const bg = isStrong ? "#0c5" : isWeak ? "#cc3" : "#a22";
+  const fg = isStrong || !isWeak ? "#fff" : "#000";
+  // Mevcut evidence_summary çok kısa veya boş; buradaki tooltip
+  // operatöre confidence tier'ını ve neyin teyit olmadığını anlatır.
+  const tooltip = isUnknown
+    ? "Bilinmeyen — hiçbir kanıt eşiği aşmadı."
+    : isStrong
+      ? "Güçlü güven — MAC / wireless-mode / platform gibi çoklu kanıt teyit etti."
+      : "Zayıf güven — yalnız isim pattern'i (weak_name_pattern veya düşük puanlı name hint). MAC / wireless doğrulaması yok.";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span
+        title={tooltip}
+        style={{
+          padding: "1px 6px",
+          borderRadius: 3,
+          fontSize: 10,
+          background: bg,
+          color: fg,
+          fontWeight: 600,
+        }}
+      >
+        {tierLabel}
+      </span>
+      <span style={{ color: "#9aa1aa", fontSize: 12 }}>{d.confidence}</span>
+    </div>
+  );
 }
