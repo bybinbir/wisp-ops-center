@@ -1,0 +1,234 @@
+# Phase 10F-A — Destructive-action safety alert rules.
+#
+# These PromQL rules pin the safety alarms a downstream Alertmanager
+# should fire on. They consume metrics that the API server does NOT
+# YET expose; the metrics surface lands as a follow-up PR (Phase
+# 10F-B or later). Until then:
+#
+#   - Keep this file load-clean (Prometheus parses on reload but
+#     evaluating an unknown metric name yields an empty result, which
+#     is safe — no alert ever fires).
+#   - Track each rule against the operator-facing log/audit query
+#     fallback documented in `docs/SAFETY_ALERTING.md`. The fallback
+#     is what oncall runs by hand until metrics ship.
+#
+# Naming convention:
+#   wisp_destructive_*   — counters / gauges scoped to the destructive runtime
+#   wisp_secret_*        — secret-leak detector counters (audit metadata + result jsonb)
+#   wisp_mac_*           — raw 6-octet MAC detector counters
+#
+# Severity matrix:
+#   critical → page oncall now. Indicates a safety-invariant breach.
+#   warning  → record + investigate next business day.
+#   info     → housekeeping signal; no action required by oncall.
+
+groups:
+  - name: wisp-destructive-safety
+    interval: 1m
+    rules:
+
+      # ─── A. Successful destructive Execute is the load-bearing
+      # invariant of every Phase 10A→10E review. If this counter ever
+      # increments while the deployment has not authorised real
+      # destructive runs, page immediately.
+      - alert: WispDestructiveSucceededUnexpected
+        expr: increase(wisp_destructive_succeeded_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          surface: destructive
+          phase: "10E"
+        annotations:
+          summary: "Destructive action succeeded — verify operator authorised run"
+          description: |
+            wisp_destructive_succeeded_total incremented in the last 5 minutes.
+            This MUST correspond to an operator-authorised run inside an open
+            maintenance window. Cross-check audit_logs:
+              SELECT * FROM audit_logs
+              WHERE action LIKE 'network_action.execute_%'
+                AND at >= now() - interval '15 minutes'
+              ORDER BY at DESC;
+
+      # ─── B. Destructive call attempted while the master switch is
+      # closed. The pre-gate already turns this into a denied run; the
+      # alert exists to detect repeated attempts (possible misuse or
+      # misconfigured client).
+      - alert: WispDestructiveAttemptedWhileDisabled
+        expr: increase(wisp_destructive_attempted_blocked_total[15m]) > 5
+        for: 0m
+        labels:
+          severity: warning
+          surface: destructive
+          phase: "10A"
+        annotations:
+          summary: "Destructive attempts blocked by master switch"
+          description: |
+            wisp_destructive_attempted_blocked_total has gained more than 5
+            increments in the last 15 minutes. Inspect actor + correlation_id:
+              SELECT actor, COUNT(*)
+              FROM audit_logs
+              WHERE action = 'network_action.live_start_blocked'
+                AND at >= now() - interval '15 minutes'
+              GROUP BY actor
+              ORDER BY 2 DESC;
+
+      # ─── C. Verification failed but rollback DID restore the snapshot.
+      # The run row's terminal status is failed. The alert exists so an
+      # operator notices that a real wireless device misbehaved (drift,
+      # unsupported channel) even though no permanent damage was done.
+      - alert: WispDestructiveVerifyFailedRollbackRecovered
+        expr: increase(wisp_destructive_verification_failed_total[30m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          surface: destructive
+          phase: "10E"
+        annotations:
+          summary: "Destructive verify failed but rollback recovered"
+          description: |
+            A frequency_correction run reached the device, the post-write
+            verify did not match the requested frequency, and the rollback
+            write restored the snapshot value. The device is back at the
+            prior state but operator should review the channel selection
+            policy. Audit trail:
+              SELECT subject, metadata->>'verify_error' AS verify_error
+              FROM audit_logs
+              WHERE action = 'network_action.execute_verification_failed'
+                AND at >= now() - interval '30 minutes';
+
+      # ─── D. Rollback FAILED. This is the worst-case shape: a
+      # destructive write landed on the device, verification did NOT
+      # match the target, AND the rollback write could not restore the
+      # snapshot. The device is in an unknown state from the runtime's
+      # perspective. Page immediately.
+      - alert: WispDestructiveRollbackFailed
+        expr: increase(wisp_destructive_rollback_failed_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          surface: destructive
+          phase: "10E"
+        annotations:
+          summary: "Destructive rollback failed — device may be in unknown state"
+          description: |
+            A frequency_correction run reached the device, verification missed,
+            and the rollback could not restore the snapshot value. Operator
+            MUST review the device manually. Run row + audit:
+              SELECT id, action_type, error_code, error_message, started_at
+              FROM network_action_runs
+              WHERE error_code = 'rollback_failed'
+                AND created_at >= now() - interval '5 minutes';
+
+      # ─── E. execute_not_implemented spike. Phase 10D ships every
+      # destructive Kind as a stub returning ErrActionNotImplemented;
+      # this counter rising sharply means a client is repeatedly
+      # invoking a Kind whose real Execute has not landed yet, or a
+      # client is misusing the destructive surface for discovery.
+      - alert: WispDestructiveExecuteNotImplementedSpike
+        expr: increase(wisp_destructive_execute_not_implemented_total[15m]) > 20
+        for: 0m
+        labels:
+          severity: warning
+          surface: destructive
+          phase: "10D"
+        annotations:
+          summary: "execute_not_implemented spike — client misuse?"
+          description: |
+            wisp_destructive_execute_not_implemented_total gained more than 20
+            increments in the last 15 minutes. Possible cause: a client thinks
+            a destructive Kind is implemented and retries. Inspect:
+              SELECT actor, action_type, COUNT(*)
+              FROM network_action_runs
+              WHERE error_code = 'action_not_implemented'
+                AND created_at >= now() - interval '15 minutes'
+              GROUP BY actor, action_type
+              ORDER BY 3 DESC;
+
+      # ─── F. Provider toggle enabled OUTSIDE an active maintenance
+      # window. The pre-gate denies destructive calls when the window
+      # is missing/closed; this gauge captures the toggle being open
+      # without an active window — a configuration smell.
+      - alert: WispProviderToggleEnabledOutsideWindow
+        expr: |
+          (wisp_provider_destructive_toggle_state == 1)
+          and on()
+          (wisp_active_maintenance_windows == 0)
+        for: 5m
+        labels:
+          severity: warning
+          surface: destructive
+          phase: "10A"
+        annotations:
+          summary: "Destructive toggle ON but no active maintenance window"
+          description: |
+            The destructive provider toggle has been enabled for at least 5
+            minutes while no maintenance window is active. Pre-gate keeps
+            denying requests, so safety holds — but the operator likely
+            forgot to flip the toggle off. Cross-check the toggle ledger:
+              SELECT enabled, actor, reason, flipped_at
+              FROM network_action_toggle_flips
+              ORDER BY flipped_at DESC LIMIT 5;
+
+      # ─── G. Secret-leak detector. The handler + action layer
+      # sanitise audit metadata + result jsonb before persistence; if
+      # this counter ever fires the sanitiser missed a code path. Treat
+      # as critical even at 1 increment.
+      - alert: WispSecretLeakDetected
+        expr: increase(wisp_secret_leak_detected_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          surface: leak
+        annotations:
+          summary: "Secret-shaped substring detected in audit/result jsonb"
+          description: |
+            A run row or audit metadata row contains a substring matching one
+            of the secret-shaped patterns (password=, token=, secret=, DSN
+            credentials, …). Audit + run row dump:
+              SELECT id, action, metadata
+              FROM audit_logs
+              WHERE metadata::text ~* '(password|secret|token|key|passwd)\s*[=:]'
+                AND at >= now() - interval '1 hour';
+
+      # ─── H. Raw 6-octet MAC leak detector. MAC values must be
+      # masked before they reach audit metadata or result jsonb.
+      - alert: WispRawMacLeakDetected
+        expr: increase(wisp_mac_leak_detected_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          surface: leak
+        annotations:
+          summary: "Raw 6-octet MAC detected in audit/result jsonb"
+          description: |
+            A run row or audit metadata row contains a 6-octet MAC
+            (AA:BB:CC:DD:EE:FF). The masking helper missed this code path.
+            Detection query:
+              SELECT id, action
+              FROM audit_logs
+              WHERE metadata::text ~ '[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}'
+                AND at >= now() - interval '1 hour';
+
+  - name: wisp-retention-housekeeping
+    interval: 5m
+    rules:
+
+      # ─── I. Retention deleted unexpectedly large batch. The default
+      # retention policy keeps audit_logs append-only; if a batch
+      # exceeds the threshold below, the operator likely flipped Mode
+      # to Execute on a misconfigured horizon.
+      - alert: WispRetentionDeletedLargeBatch
+        expr: increase(wisp_retention_deleted_rows_total[1h]) > 100000
+        for: 0m
+        labels:
+          severity: warning
+          surface: retention
+        annotations:
+          summary: "Retention deleted > 100k rows in the last hour"
+          description: |
+            The retention service ran in ModeExecute and removed more than
+            100,000 rows. Confirm this matches the planned retention horizon
+            and not a misconfigured cutoff. Audit query:
+              SELECT * FROM audit_logs
+              WHERE action = 'retention.deleted'
+                AND at >= now() - interval '1 hour';
