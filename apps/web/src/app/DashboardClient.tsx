@@ -120,6 +120,57 @@ export function DashboardClient() {
         {disc.last_run && <RunBriefRow run={disc.last_run} />}
       </section>
 
+      {/* Phase R2 — sınıflandırma kovaları */}
+      <section className="section">
+        <div className="section-header">
+          <h3 className="section-title">Sınıflandırma Kovaları</h3>
+          <DataSource
+            code={
+              disc.classification.total === 0
+                ? "missing"
+                : disc.classification.non_unknown_percentage >=
+                    disc.classification.target_non_unknown_min_percentage
+                  ? "real"
+                  : "missing"
+            }
+          />
+        </div>
+        <div className="cards">
+          <StatCard
+            title="Güçlü Sınıflandırma"
+            value={disc.classification.strong}
+            meta={`%${disc.classification.strong_percentage.toFixed(1)} — confidence > 50`}
+          />
+          <StatCard
+            title="Zayıf Sınıflandırma"
+            value={disc.classification.weak}
+            meta={`%${disc.classification.weak_percentage.toFixed(1)} — name-only / weak_name_pattern`}
+          />
+          <StatCard
+            title="Bilinmeyen"
+            value={disc.classification.unknown}
+            meta={`%${disc.unknown_percentage.toFixed(1)} — hedef: <%${disc.classification.target_unknown_max_percentage}`}
+          />
+          <StatCard
+            title="weak_name_pattern"
+            value={disc.classification.weak_by_pattern}
+            meta="R2 fallback eşleşen cihaz"
+          />
+        </div>
+        <ProgressBar
+          label="Sınıflandırılmış (Strong + Weak)"
+          pct={disc.classification.non_unknown_percentage}
+          targetPct={disc.classification.target_non_unknown_min_percentage}
+        />
+        <div className="info-box" style={{ marginTop: 8 }}>
+          <strong>Strong</strong> = MAC + platform + wireless-mode gibi çoklu
+          kanıt ile sınıflandırılmış. <strong>Weak</strong> = sadece isim
+          pattern'i (mevcut name_hint veya R2 weak_name_pattern fallback) —
+          MAC/wireless doğrulaması yok. <strong>Bilinmeyen</strong> = hiçbir
+          eşik aşılmadı; sahte kesinlik üretmedik.
+        </div>
+      </section>
+
       <section className="section">
         <div className="section-header">
           <h3 className="section-title">Ağ Aksiyonları (son 24 saat)</h3>
@@ -473,6 +524,69 @@ function DataSource({ code }: { code: DataCode }) {
     >
       {m.label}
     </span>
+  );
+}
+
+function ProgressBar({
+  label,
+  pct,
+  targetPct,
+}: {
+  label: string;
+  pct: number;
+  targetPct: number;
+}) {
+  // hedefe ulaşıldı mı?
+  const hit = pct >= targetPct;
+  const fillColor = hit ? "#0c5" : pct >= targetPct * 0.66 ? "#cc3" : "#a22";
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 12,
+          color: "#9aa1aa",
+        }}
+      >
+        <span>{label}</span>
+        <span>
+          %{pct.toFixed(1)} / hedef %{targetPct.toFixed(0)}
+          {hit ? " ✓" : ""}
+        </span>
+      </div>
+      <div
+        style={{
+          marginTop: 4,
+          height: 8,
+          background: "#1f242c",
+          borderRadius: 4,
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        <div
+          style={{
+            width: Math.min(100, pct).toFixed(1) + "%",
+            height: "100%",
+            background: fillColor,
+            transition: "width 200ms ease",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: Math.min(100, targetPct).toFixed(1) + "%",
+            top: 0,
+            bottom: 0,
+            width: 1,
+            background: "#fff",
+            opacity: 0.5,
+          }}
+          title={`hedef %${targetPct}`}
+        />
+      </div>
+    </div>
   );
 }
 
