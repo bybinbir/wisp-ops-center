@@ -78,6 +78,13 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// by design while DestructiveActionEnabled stays false.
 	mux.HandleFunc("/api/v1/network/actions/destructive/", s.handleDestructiveDispatch)
 	mux.HandleFunc("/api/v1/network/actions/lifecycle/", s.handleActionLifecycle)
+
+	// Phase R1 — Operator-usable dashboard. Read-only.
+	//   /operations-panel               — discovery + actions + safety + health summary
+	// Per-device evidence drill-down is dispatched from the existing
+	// /api/v1/network/devices/{id}/evidence path-tail (see
+	// handleNetworkDevicesDispatch); no new mux entry needed.
+	mux.HandleFunc("/api/v1/dashboard/operations-panel", s.handleOperationsPanel)
 }
 
 // handleReportsRoot, /api/v1/reports kökü — snapshot listesi.

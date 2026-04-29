@@ -2,15 +2,35 @@
 
 Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
+> **2026-04-29 — Audit Verdict (WISP-PRODUCT-REALITY-AUDIT-001):** previous "FULLY CLOSED" / "engineering closure" labels stand only for the **engineering chassis** (safety, transport, schema, scoring code). The **operator-facing product MVP is not yet stood up** for `194.15.45.62`. See `docs/PRODUCT_REALITY_AUDIT.md` and `docs/MVP_RESCUE_PLAN.md`. The next phase is **Phase R1 — Operator-usable dashboard + inventory UI**, not Phase 10E PR-B.
+
 ---
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A, 10B, 10C, 10D, 10E PR-A**
-- ▣ Active: **Phase 10F-A — engineering hardening** (RBAC strict-mode hardening + KVKK retention foundation + Prometheus alert rules + safety alerting docs). Master switch hâlâ kapalı; destructive Execute kod yolu main'de ama API'den ulaşılamaz (server.go register etmiyor).
-- ☐ Remaining:
-  - **Phase 10E PR-B** — production wiring (`server.go` `RegisterFrequencyCorrection` + mikrotik adapter `FrequencyCorrectionWriter` implementer) + lab smoke 9-row matrix. Operatörün wireless RouterOS test target'ı sağlaması gerek.
-  - **Phase 10F-B+** — Prometheus `/metrics` endpoint + counter/gauge surface, retention scheduler invocation (cron / systemd), TLS uçtan uca, KMS/Vault rotation, multi-tenant RBAC izolasyon, SOC2 / KVKK uyum kontrol listesi.
+### Engineering chassis (engineering-closed)
+
+- ☑ **Engineering-closed (≠ product-closed):** Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A, 10B, 10C, 10D, 10E PR-A, 10F-A.
+- main HEAD: `0b987d1` (Phase 10F-A merged 2026-04-29).
+- Quality gates re-run in audit pass: `gofmt -l .` clean · `go vet ./...` RC=0 · `go build ./...` RC=0 · `go test -short ./...` RC=0 (16 packages PASS, 16 no-test) · `apps/web tsc --noEmit` RC=0. `next build` not run (sandbox wall-clock).
+
+### Product MVP (rescue plan)
+
+- ▣ **Phase R1 — Operator-usable dashboard + inventory UI.** ENGINEERING-LANDED on `phase/r1-operator-dashboard-and-evidence` 2026-04-29. New endpoints: `GET /api/v1/dashboard/operations-panel` and `GET /api/v1/network/devices/{id}/evidence`. Frontend rewrite of `/` (operations panel sourcing real discovery + actions + safety + health), `EvidenceModal` drill-down on `/ag-envanteri` rows, applicability hints on per-row action buttons. +12 unit tests (apps/api/internal/http: 4→16). Quality gates: gofmt clean, vet RC=0, build RC=0, full repo test RC=0, tsc RC=0. Detail: `docs/R1_OPERATOR_DASHBOARD_REPORT.md`.
+- ☐ Phase R2 — Real Dude classification correction. Target: <30% Unknown on the live dataset. Source-yield audit + 6th enrichment source + secondary heuristic tier with `confidence ≤ 50` + evidence rows.
+- ☐ Phase R3 — Real wireless RouterOS lab target + readable action results. Operator-side prerequisite (provision wireless device); polish action panels; per-device action history tab.
+- ☐ Phase R4 — Scheduled checks + reports. Add the 4 read-only actions to `JobCatalog`; signal heatmap; replace the `/frekans-onerileri` stub handler with a real one.
+- ☐ Phase R5 — Controlled corrective `frequency_correction` wiring (replaces the old "Phase 10E PR-B"). Four operator-side preconditions must hold: real wireless target, active MaintenanceWindow, named rollback owner, two-layer master-switch approval path.
+
+### Engineering hardening backlog (deferred until R1–R3 land)
+
+- ☐ Phase 10F-B+ — Prometheus `/metrics` surface, retention scheduler invocation, TLS, KMS/Vault rotation, multi-tenant RBAC, SOC2/KVKK external compliance.
+- ☐ Phase 7 work_orders schema conflict (000001 ↔ 000007).
+- ☐ Windows `scripts/db_migrate.sh` DSN parsing fix.
+
+### Honesty rule going forward
+
+Every PR description must end with a one-line **Operator-usable delta** statement — what the operator can do in the browser today that they could not before this PR. PRs whose delta is "none" are tagged `engineering-only` and do not count toward R1–R5 progress.
 
 ### Phase 10 preconditions (handed forward by Phase 10A)
 
@@ -363,39 +383,4 @@ Detay: `docs/PHASE_008_MIKROTIK_DUDE_DISCOVERY.md`. Branch: `phase/008-mikrotik-
 ### Phase 10D — Destructive Happy-Path Lifecycle (no execution): ▣ ACTIVE
 - **Hedef:** Toggle ON + window aktif + RBAC granted senaryosunda 8-step pre-gate'ten geçen ilk yol; Execute() hâlâ stub `ErrActionNotImplemented` döner; lifecycle full audit emit eder.
 - **Yeni audit event'leri:** `network_action.execute_attempted`, `network_action.execute_not_implemented` (gate_pass'ten sonra).
-- **Senaryo matrisi:** {toggle on/off} × {window aktif/yok} × {RBAC granted/denied} × {idempotency yeni/yeniden}.
-- **Hedef test diff:** +12-15 yeni test (toplam ~120-123).
-- **Migration:** gerekmiyor (000013 yeterli).
-- **DoD:** master switch açıkken bile `0 destructive succeeded`, `0 mutation cmd`, `0 secret leak`, `0 raw MAC`; lifecycle 5+ event/run; happy-path smoke senaryosu kanıtlı.
-
-### Phase 10E — Real Mutation Execution: ☐ Planned
-- Tek action (frequency_correction önerisi) + tek device + dry-run vs live diff karşılaştırma + verification + auto-rollback path.
-- Per-device per-action lock (Phase 8 framework + idempotency DB unique = hazır).
-- Bu fazın ilk PR'ı **production'a açmaz** — sadece lab smoke; production toggle ayrı bir karar.
-
-### Phase 10F — Production Hardening: ☐ Planned
-- TLS uçtan uca + secret rotasyon prosedürü.
-- Vault/KMS entegrasyonu (vault entry `wisp-ops-center/secret/...`).
-- Prometheus + alert rules (gate denied rate, destructive run rate, audit event spike).
-- Backup/restore drill (Postgres physical + logical, point-in-time recovery test).
-- RBAC + multi-tenant izolasyon (PgRoleResolver SQL-first, RequireSQL=true).
-- SOC2 / KVKK uyum kontrol listesi.
-
----
-
-## 9. Definition of Done
-
-- ☑ Code implemented (deterministik, no placeholder)
-- ☑ Docs updated (`docs/`, README, TASK_BOARD)
-- ☑ Migrations added (idempotent, transactional)
-- ☑ Safety preserved (no write, no apply, no fake data)
-- ☑ Audit coverage (mutating actions)
-- ☑ No fake data (`data_insufficient` doğru üretiliyor)
-- ☑ `gofmt -l .` temiz
-- ☑ `go vet ./...` temiz
-- ☑ `go test ./...` yeşil
-- ☑ `go build ./...` yeşil
-- ☐ `npx tsc --noEmit` / `npm run build` — yalnız Node toolchain'i mevcutsa
-- ☐ API smoke (Postgres çalışırsa) — sandbox kısıtı
-- ☑ Blockers reported (final raporda)
-- ☑ Branch/commit status reported (`phase/006-customer-signal-scoring`)
+- **Senaryo matrisi:** {toggle on/off} × {window aktif/y

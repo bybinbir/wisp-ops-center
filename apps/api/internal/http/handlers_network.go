@@ -414,12 +414,21 @@ func computeSummary(rows []networkinv.Device) map[string]int {
 	return summary
 }
 
-// handleNetworkDevicesDispatch routes /api/v1/network/devices and
-// /api/v1/network/devices/{id} to the right handler.
+// handleNetworkDevicesDispatch routes /api/v1/network/devices,
+// /api/v1/network/devices/{id} and (Phase R1)
+// /api/v1/network/devices/{id}/evidence to the right handler.
 func (s *Server) handleNetworkDevicesDispatch(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/network/devices")
 	if rest == "" || rest == "/" {
 		s.handleNetworkDevices(w, r)
+		return
+	}
+	// Phase R1: /api/v1/network/devices/{id}/evidence — drill-down
+	// answering "why is this device classified this way?". Routed
+	// before the generic item handler so the trailing segment is
+	// preserved.
+	if strings.HasSuffix(rest, "/evidence") {
+		s.handleNetworkDeviceEvidence(w, r)
 		return
 	}
 	s.handleNetworkDeviceItem(w, r)
