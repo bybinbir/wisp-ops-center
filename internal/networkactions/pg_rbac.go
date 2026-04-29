@@ -66,16 +66,28 @@ func NewPgRBACResolver(p *pgxpool.Pool, fallback RBACResolver) *PgRBACResolver {
 
 // Capabilities implements RBACResolver. The lookup order is:
 //
-//  1. SQL resolver (when wired). Found → those roles drive caps.
-//  2. SQL says ErrPrincipalUnknown:
+//  1. RequireSQL=true and SQL not wired → ErrRBACResolverUnavailable
+//     (Phase 10F-A hardening: header roles MUST NOT authorise a
+//     destructive call when the operator has explicitly demanded
+//     SQL-backed RBAC).
+//  2. SQL resolver wired. Found → those roles drive caps.
+//  3. SQL says ErrPrincipalUnknown:
 //     - RequireSQL=true  → return ErrPrincipalUnknown (deny).
 //     - RequireSQL=false → fall back to Fallback (header roles).
-//  3. SQL says ErrRBACResolverUnavailable → return that (deny).
-//  4. SQL not wired → Fallback.
+//  4. SQL says any other error (DB outage, malformed actor) →
+//     return that (deny). Never falls through to header roles.
+//  5. SQL not wired and RequireSQL=false → Fallback.
 //
 // Either branch returns a non-nil error or a possibly-empty slice.
 func (r *PgRBACResolver) Capabilities(ctx context.Context, p Principal) ([]Capability, error) {
 	if r == nil || r.Fallback == nil {
+		return nil, ErrRBACResolverUnavailable
+	}
+	// Phase 10F-A: RequireSQL=true is the operator's promise that
+	// header roles are not authoritative for this deployment. If
+	// the SQL seam is missing for any reason we MUST fail closed
+	// rather than degrade silently to the static fallback.
+	if r.RequireSQL && r.SQL == nil {
 		return nil, ErrRBACResolverUnavailable
 	}
 	if r.SQL != nil {

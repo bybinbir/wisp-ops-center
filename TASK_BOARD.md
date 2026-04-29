@@ -6,9 +6,11 @@ Notasyon: ☐ yapılmadı · ▣ kısmen · ☑ tamamlandı.
 
 ## 1. Current Status
 
-- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A, 10B, 10C**
-- ▣ Active: **Phase 10D — destructive happy-path lifecycle (no execution)** — branch henüz açılmadı; gate'ten geçen ilk dry-run/confirm yolu; Execute() hâlâ stub (`ErrActionNotImplemented`); cihaza tek byte yazılmaz.
-- ☐ Remaining: **Phase 10E — gerçek mutation execution** (tek action + tek device + dry-run karşılaştırma + rollback drill); **Phase 10F — production hardening** (TLS uçtan uca, KMS, Prometheus alerts, multi-tenant RBAC izolasyon, SOC2 / KVKK uyum)
+- ☑ Completed: **Phase 1, 2, 3, 4, 5, 6, 7, 8, 8.1, 9, 9 v2, 9 v3, 10A, 10B, 10C, 10D, 10E PR-A**
+- ▣ Active: **Phase 10F-A — engineering hardening** (RBAC strict-mode hardening + KVKK retention foundation + Prometheus alert rules + safety alerting docs). Master switch hâlâ kapalı; destructive Execute kod yolu main'de ama API'den ulaşılamaz (server.go register etmiyor).
+- ☐ Remaining:
+  - **Phase 10E PR-B** — production wiring (`server.go` `RegisterFrequencyCorrection` + mikrotik adapter `FrequencyCorrectionWriter` implementer) + lab smoke 9-row matrix. Operatörün wireless RouterOS test target'ı sağlaması gerek.
+  - **Phase 10F-B+** — Prometheus `/metrics` endpoint + counter/gauge surface, retention scheduler invocation (cron / systemd), TLS uçtan uca, KMS/Vault rotation, multi-tenant RBAC izolasyon, SOC2 / KVKK uyum kontrol listesi.
 
 ### Phase 10 preconditions (handed forward by Phase 10A)
 
