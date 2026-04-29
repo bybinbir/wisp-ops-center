@@ -12,8 +12,12 @@ import (
 // adds exactly two more.
 func TestDestructiveAuditCatalog_Phase10D(t *testing.T) {
 	got := DestructiveAuditCatalog()
-	if len(got) != 12 {
-		t.Errorf("catalog size = %d, want 12 (Phase 10A: 7 + Phase 10C: 3 + Phase 10D: 2)", len(got))
+	// Phase 10E added eight more events; the size assertion is a
+	// lower bound so this stays a Phase 10D regression guard rather
+	// than a moving target. Phase 10E's catalog test pins the exact
+	// total going forward.
+	if len(got) < 12 {
+		t.Errorf("catalog size = %d, want >= 12 (Phase 10A: 7 + Phase 10C: 3 + Phase 10D: 2)", len(got))
 	}
 	must := map[DestructiveAuditAction]bool{
 		AuditActionExecuteAttempted:      false,

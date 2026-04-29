@@ -515,7 +515,7 @@ func (s *Server) runDestructiveActionAsync(
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer execCancel()
-	_, execErr := action.Execute(execCtx, networkactions.Request{
+	execResult, execErr := action.Execute(execCtx, networkactions.Request{
 		Kind:          kind,
 		DeviceID:      deviceID,
 		CorrelationID: correlationID,
@@ -525,6 +525,12 @@ func (s *Server) runDestructiveActionAsync(
 		Reason:        intent,
 	})
 
+	// Phase 10D legacy stub branch: any destructive Kind whose
+	// registry entry is still the Phase 8 stub returns the
+	// ErrActionNotImplemented sentinel here. We keep the original
+	// audit + finalize so Kinds that have not landed yet (e.g.
+	// future bridge / link writes) still record the same Phase 10D
+	// terminal event downstream consumers grew alerts on.
 	if errors.Is(execErr, networkactions.ErrActionNotImplemented) {
 		s.audit(gateCtx, audit.Entry{
 			Actor:   principal.Actor,
@@ -550,38 +556,72 @@ func (s *Server) runDestructiveActionAsync(
 		return
 	}
 
-	// Phase 10D MUST NOT reach this branch. Every destructive Kind is
-	// a stub returning ErrActionNotImplemented. Reaching here means a
-	// Kind was implemented before its safety review — fail closed.
-	s.log.Error("phase_10d_invariant_violated",
-		"reason", "destructive_execute_returned_non_not_implemented",
-		"action_type", string(kind),
-		"run_id", runID,
-		"err", execErr,
-	)
-	violationMsg := "Phase 10D invariant: destructive Execute returned a non-NotImplemented result. Operator must review."
-	if execErr != nil {
-		violationMsg = networkactions.SanitizeMessage(execErr.Error())
+	// Phase 10E real-Execute branch. The concrete action emits its
+	// own lifecycle audit events (execute_started / write_succeeded
+	// / verified / verification_failed / rollback_*); the handler
+	// just persists the run row's terminal status from execResult.
+	//
+	// execResult carries a sanitized Result map and an optional
+	// ErrorCode. We sanitize once more at the boundary for defense
+	// in depth — there is no harm in redacting twice; there is real
+	// harm in skipping it because the action forgot.
+	if execErr != nil &&
+		!errors.Is(execErr, networkactions.ErrFrequencyDeviceUnreachable) &&
+		!errors.Is(execErr, networkactions.ErrFrequencyUnreadable) &&
+		!errors.Is(execErr, networkactions.ErrFrequencyWriteFailed) &&
+		!errors.Is(execErr, networkactions.ErrFrequencyVerificationFailedRollbackRecovered) &&
+		!errors.Is(execErr, networkactions.ErrFrequencyRollbackFailed) {
+		// An Execute that returned an error neither Phase 10D's
+		// NotImplemented sentinel NOR a Phase 10E known-shape
+		// failure is a true invariant violation. Fail closed and
+		// pin the moment in audit.
+		s.log.Error("phase_10e_invariant_violated",
+			"reason", "destructive_execute_returned_unexpected_error",
+			"action_type", string(kind),
+			"run_id", runID,
+			"err", execErr,
+		)
+		violationMsg := networkactions.SanitizeMessage(execErr.Error())
+		s.audit(gateCtx, audit.Entry{
+			Actor:   principal.Actor,
+			Action:  audit.Action(networkactions.AuditActionDestructiveDenied),
+			Outcome: audit.OutcomeFailure,
+			Subject: runID,
+			Metadata: map[string]any{
+				"run_id":         runID,
+				"action_type":    string(kind),
+				"correlation_id": correlationID,
+				"error_code":     "phase_10e_invariant_violation",
+				"phase":          "phase_10e_invariant_violated",
+			},
+		})
+		_ = s.actionRepo.FinalizeRun(gateCtx, runID, networkactions.FinalizeInput{
+			Status:       networkactions.StatusFailed,
+			DurationMS:   time.Since(startedAt).Milliseconds(),
+			Result:       map[string]any{"phase": "phase_10e_invariant_violated"},
+			ErrorCode:    "phase_10e_invariant_violation",
+			ErrorMessage: violationMsg,
+		})
+		return
 	}
-	s.audit(gateCtx, audit.Entry{
-		Actor:   principal.Actor,
-		Action:  audit.Action(networkactions.AuditActionDestructiveDenied),
-		Outcome: audit.OutcomeFailure,
-		Subject: runID,
-		Metadata: map[string]any{
-			"run_id":         runID,
-			"action_type":    string(kind),
-			"correlation_id": correlationID,
-			"error_code":     "phase_10d_invariant_violation",
-			"phase":          "phase_10d_invariant_violated",
-		},
-	})
+
+	// Normal Phase 10E terminal: persist whatever the action decided.
+	status := networkactions.StatusFailed
+	if execResult.Success {
+		status = networkactions.StatusSucceeded
+	}
+	finalizeResult := networkactions.SanitizeResultMap(execResult.Result)
+	finalizeErrMsg := networkactions.SanitizeMessage(execResult.Message)
+	finalizeErrCode := execResult.ErrorCode
+	if finalizeErrCode == "" && !execResult.Success {
+		finalizeErrCode = "execute_failed_no_error_code"
+	}
 	_ = s.actionRepo.FinalizeRun(gateCtx, runID, networkactions.FinalizeInput{
-		Status:       networkactions.StatusFailed,
+		Status:       status,
 		DurationMS:   time.Since(startedAt).Milliseconds(),
-		Result:       map[string]any{"phase": "phase_10d_invariant_violated"},
-		ErrorCode:    "phase_10d_invariant_violation",
-		ErrorMessage: violationMsg,
+		Result:       finalizeResult,
+		ErrorCode:    finalizeErrCode,
+		ErrorMessage: finalizeErrMsg,
 	})
 }
 
