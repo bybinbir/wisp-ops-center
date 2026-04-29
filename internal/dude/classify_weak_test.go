@@ -266,8 +266,6 @@ func TestWeak_LowConfidencePrimaryStillWeakBucket(t *testing.T) {
 	}
 }
 
-
-
 func TestWeak_AP_OmnTokenMatchesViaFallback(t *testing.T) {
 	// R3 tuning: lab data shows "OMN" / "OMN2" suffix is operator's
 	// shorthand for an AP/omni device (12 devices observed in the
