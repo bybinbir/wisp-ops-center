@@ -646,3 +646,157 @@ export type ExecutiveSummary = {
     healthy: number;
   }>;
 };
+
+// ─── Phase R1 — Operator-usable dashboard ─────────────────────────
+
+export type OpsRunBrief = {
+  id: string;
+  status: string;
+  started_at: string;
+  finished_at?: string;
+  device_count: number;
+  error_code?: string;
+  error_message?: string;
+  triggered_by: string;
+};
+
+export type OpsInvTotals = {
+  total: number;
+  ap: number;
+  link: number;
+  bridge: number;
+  cpe: number;
+  router: number;
+  switch: number;
+  unknown: number;
+  low_confidence: number;
+  with_mac: number;
+  with_host: number;
+  enriched: number;
+};
+
+export type OpsActionWindow = {
+  total: number;
+  succeeded: number;
+  skipped: number;
+  failed: number;
+  running: number;
+  by_kind: Record<string, number>;
+};
+
+export type OpsActionBrief = {
+  id: string;
+  action_type: string;
+  status: string;
+  started_at: string;
+  duration_ms: number;
+  confidence: number;
+  dry_run: boolean;
+  target_label?: string;
+  target_host?: string;
+  correlation_id: string;
+};
+
+export type OpsSafety = {
+  destructive_enabled: boolean;
+  toggle_source: string;
+  active_maintenance_windows: unknown[];
+  blocking_reasons: string[];
+  dry_run_only: boolean;
+  legacy_master_switch_enabled: boolean;
+  provider_toggle_enabled: boolean;
+  last_flip?: { enabled: boolean; actor: string; reason: string; flipped_at: string };
+  checklist: string[];
+};
+
+export type OpsHealth = {
+  db_ok: boolean;
+  dude_configured: boolean;
+  dude_host?: string;
+  last_dude_test_at?: string;
+  last_dude_test_reachable?: boolean;
+  last_dude_test_error_code?: string;
+};
+
+export type OpsDataInsufficient = {
+  area_code: string;
+  title: string;
+  reason: string;
+  hint?: string;
+};
+
+export type OperationsPanel = {
+  generated_at: string;
+  discovery: {
+    configured: boolean;
+    last_run?: OpsRunBrief;
+    last_run_finished_seconds_ago?: number;
+    totals: OpsInvTotals;
+    unknown_percentage: number;
+    low_confidence_percentage: number;
+  };
+  actions: {
+    last_24h: OpsActionWindow;
+    latest_run?: OpsActionBrief;
+  };
+  safety: OpsSafety;
+  health: OpsHealth;
+  data_insufficient: OpsDataInsufficient[];
+};
+
+export type EvidenceRow = {
+  id: number;
+  heuristic: string;
+  category: string;
+  weight: number;
+  reason: string;
+  run_id?: string;
+  created_at: string;
+};
+
+export type EvidenceSummary = {
+  total_rows: number;
+  unique_heuristics: string[];
+  weight_by_category: Record<string, number>;
+  winner: string;
+  winner_weight: number;
+  runner_up?: string;
+  runner_up_weight?: number;
+};
+
+export type MissingSignal = {
+  signal: string;
+  explanation: string;
+  would_help: string;
+};
+
+export type ActionApplicability = {
+  kind: string;
+  suffix: string;
+  label: string;
+  applicable: "likely_yes" | "likely_no" | "unknown";
+  reason: string;
+  safety_status: string;
+};
+
+export type RecentDeviceAction = {
+  id: string;
+  action_type: string;
+  status: string;
+  started_at: string;
+  duration_ms: number;
+  confidence: number;
+  dry_run: boolean;
+  skipped: boolean;
+  skip_reason?: string;
+};
+
+export type DeviceEvidence = {
+  device: NetworkDevice;
+  evidence: EvidenceRow[];
+  evidence_summary: EvidenceSummary;
+  missing_signals: MissingSignal[];
+  applicable_actions: ActionApplicability[];
+  recent_actions?: RecentDeviceAction[];
+  generated_at: string;
+};

@@ -15,6 +15,7 @@ import {
 import { StatCard } from "@/components/StatCard";
 import { Toolbar, Button } from "@/components/Toolbar";
 import { Field, Select } from "@/components/Field";
+import { EvidenceModal } from "./EvidenceModal";
 
 type Filters = {
   category: NetworkCategory | "";
@@ -44,6 +45,8 @@ export function NetworkInventoryClient() {
   const [test, setTest] = useState<DudeTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [running, setRunning] = useState(false);
+  // Phase R1: device evidence drill-down — null when no modal open.
+  const [evidenceForId, setEvidenceForId] = useState<string | null>(null);
 
   async function loadDevices(f: Filters) {
     const params = new URLSearchParams();
@@ -300,7 +303,22 @@ export function NetworkInventoryClient() {
             {(devices ?? []).map((d) => (
               <tr key={d.id}>
                 <td>
-                  <strong>{d.name || "(isimsiz)"}</strong>
+                  <button
+                    type="button"
+                    onClick={() => setEvidenceForId(d.id)}
+                    title="Sınıflandırma kanıtını ve eksik sinyalleri göster"
+                    style={{
+                      background: "transparent",
+                      color: "#9ec1ff",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      textAlign: "left",
+                    }}
+                  >
+                    {d.name || "(isimsiz)"}
+                  </button>
                   {d.mac ? <div style={{ fontSize: 11, color: "#888" }}>{d.mac}</div> : null}
                 </td>
                 <td>{d.host || "—"}</td>
@@ -336,6 +354,13 @@ export function NetworkInventoryClient() {
           </tbody>
         </table>
       )}
+      {evidenceForId && (
+        <EvidenceModal
+          deviceId={evidenceForId}
+          onClose={() => setEvidenceForId(null)}
+        />
+      )}
+
     </div>
   );
 }
@@ -350,6 +375,23 @@ function ActionButtons({ device }: { device: NetworkDevice }) {
 
   const canRun = !!device.host;
 
+  // Phase R1: per-action applicability (likely_yes / likely_no / unknown)
+  // computed locally from device.category. Backend evidence drill-down
+  // returns the same labels — keeping them in sync is intentional.
+  const cat = device.confidence < 50 ? "Unknown" : device.category;
+  const applicability = (kind: string): "likely_yes" | "likely_no" | "unknown" => {
+    const matrix: Record<string, { yes: string; no: string[] }> = {
+      frequency_check: { yes: "AP", no: ["Bridge", "Switch", "Router", "CPE"] },
+      ap_client_test:  { yes: "AP", no: ["Bridge", "Switch", "Router", "BackhaulLink"] },
+      link_signal_test: { yes: "BackhaulLink", no: ["Bridge", "Switch", "Router", "CPE"] },
+      bridge_health_check: { yes: "Bridge", no: ["AP", "Router", "CPE", "BackhaulLink"] },
+    };
+    const m = matrix[kind];
+    if (!m) return "unknown";
+    if (cat === m.yes) return "likely_yes";
+    if (m.no.includes(cat)) return "likely_no";
+    return "unknown";
+  };
   const actions: Array<{ kind: string; label: string; suffix: string; color: string }> = [
     { kind: "frequency_check",    label: "Frekans",      suffix: "frequency-check",   color: "#1d6" },
     { kind: "ap_client_test",     label: "AP Client",    suffix: "ap-client-test",    color: "#28a" },
@@ -384,27 +426,45 @@ function ActionButtons({ device }: { device: NetworkDevice }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-        {actions.map((a) => (
-          <button
-            key={a.kind}
-            type="button"
-            disabled={!canRun || submitting !== ""}
-            onClick={() => start(a.suffix, a.kind)}
-            title={canRun ? "Read-only " + a.label : "Cihaz IP'si yok"}
-            style={{
-              fontSize: 10,
-              padding: "2px 6px",
-              background: canRun ? a.color : "#444",
-              color: "#fff",
-              border: "none",
-              borderRadius: 3,
-              cursor: canRun && submitting === "" ? "pointer" : "default",
-              opacity: canRun ? 1 : 0.6,
-            }}
-          >
-            {submitting === a.kind ? "…" : a.label}
-          </button>
-        ))}
+        {actions.map((a) => {
+          const ap = applicability(a.kind);
+          const skipLikely = ap === "likely_no";
+          const tooltip = !canRun
+            ? "Cihaz IP'si yok — aksiyon koşturulamaz"
+            : skipLikely
+              ? `Cihaz kategorisi (${cat}) için bu aksiyon büyük olasılıkla skipped döner. Yine de denemek için tıklayın.`
+              : ap === "likely_yes"
+                ? `Cihaz kategorisi (${cat}) için uygun read-only aksiyon (dry-run).`
+                : `Cihaz Bilinmeyen — sonuç skipped olabilir.`;
+          return (
+            <button
+              key={a.kind}
+              type="button"
+              disabled={!canRun || submitting !== ""}
+              onClick={() => start(a.suffix, a.kind)}
+              title={tooltip}
+              style={{
+                fontSize: 10,
+                padding: "2px 6px",
+                background: !canRun
+                  ? "#444"
+                  : skipLikely
+                    ? "#3a3a3a"
+                    : a.color,
+                color: "#fff",
+                border: skipLikely
+                  ? "1px dashed #888"
+                  : "none",
+                borderRadius: 3,
+                cursor: canRun && submitting === "" ? "pointer" : "default",
+                opacity: !canRun ? 0.5 : skipLikely ? 0.7 : 1,
+              }}
+            >
+              {submitting === a.kind ? "…" : a.label}
+              {skipLikely && <span style={{ marginLeft: 3, fontSize: 8 }}>↯</span>}
+            </button>
+          );
+        })}
       </div>
       {error ? <span style={{ fontSize: 10, color: "#fa3" }}>{error}</span> : null}
     </div>
