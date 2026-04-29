@@ -71,6 +71,51 @@ const (
 	// permits; reaching a non-NotImplemented Execute return is a
 	// Phase 10D invariant violation.
 	AuditActionExecuteNotImplemented DestructiveAuditAction = "network_action.execute_not_implemented"
+	// network_action.execute_started — Phase 10E. Emitted by the
+	// concrete action AFTER it has resolved the device + read its
+	// pre-write snapshot, immediately BEFORE the first write goes
+	// out. Metadata MUST include target_host, interface, and the
+	// snapshot value the rollback path will restore to.
+	AuditActionExecuteStarted DestructiveAuditAction = "network_action.execute_started"
+	// network_action.execute_write_succeeded — Phase 10E. Emitted
+	// by the concrete action AFTER the device returned a success
+	// reply for the destructive write. The change is on the wire
+	// at this point but NOT yet verified by a read-back; do not
+	// treat this as the terminal happy event.
+	AuditActionExecuteWriteSucceeded DestructiveAuditAction = "network_action.execute_write_succeeded"
+	// network_action.execute_write_failed — Phase 10E. Emitted by
+	// the concrete action when the write itself failed (SSH error,
+	// device-side parse rejection, or the destructive_write
+	// allowlist refused the command). Terminal status: failed.
+	// No rollback is attempted: there is no successful write to
+	// reverse.
+	AuditActionExecuteWriteFailed DestructiveAuditAction = "network_action.execute_write_failed"
+	// network_action.execute_verified — Phase 10E. Terminal happy
+	// event. Emitted AFTER the post-write read-back returns a
+	// snapshot whose target field matches the requested value.
+	AuditActionExecuteVerified DestructiveAuditAction = "network_action.execute_verified"
+	// network_action.execute_verification_failed — Phase 10E.
+	// Emitted when the post-write read-back returned a value that
+	// does NOT match the request. Caller falls through to the
+	// rollback path; this event is non-terminal — exactly one of
+	// rollback_succeeded / rollback_failed must follow.
+	AuditActionExecuteVerificationFailed DestructiveAuditAction = "network_action.execute_verification_failed"
+	// network_action.execute_rollback_started — Phase 10E. Emitted
+	// at the start of the rollback write (issuing the snapshot
+	// value back to the device). Always preceded by
+	// execute_verification_failed.
+	AuditActionExecuteRollbackStarted DestructiveAuditAction = "network_action.execute_rollback_started"
+	// network_action.execute_rollback_succeeded — Phase 10E.
+	// Terminal event. The rollback write completed AND the
+	// re-verify read returned the snapshot value. Run row status:
+	// failed with error_code=verification_failed_rollback_recovered.
+	AuditActionExecuteRollbackSucceeded DestructiveAuditAction = "network_action.execute_rollback_succeeded"
+	// network_action.execute_rollback_failed — Phase 10E. Terminal
+	// event AND incident anchor. The rollback write failed or the
+	// re-verify did not match the snapshot. Operator MUST review
+	// the device manually; the destructive runtime cannot reason
+	// about the on-wire state from here.
+	AuditActionExecuteRollbackFailed DestructiveAuditAction = "network_action.execute_rollback_failed"
 )
 
 // AuditActionForGateError maps a Phase 10A pre-gate sentinel to the
@@ -92,9 +137,10 @@ func AuditActionForGateError(err error) DestructiveAuditAction {
 }
 
 // DestructiveAuditCatalog returns every audit action name Phase 10A
-// reserves plus the three Phase 10C lifecycle events plus the two
-// Phase 10D execute-path events. Tests assert this set matches what
-// TASK_BOARD documents so the catalog cannot drift unnoticed.
+// reserves plus the Phase 10C lifecycle events, the Phase 10D execute-
+// path events, and the Phase 10E real-Execute events. Tests assert
+// this set matches what TASK_BOARD documents so the catalog cannot
+// drift unnoticed.
 func DestructiveAuditCatalog() []DestructiveAuditAction {
 	return []DestructiveAuditAction{
 		AuditActionConfirmed,
@@ -109,5 +155,13 @@ func DestructiveAuditCatalog() []DestructiveAuditAction {
 		AuditActionDestructiveDenied,
 		AuditActionExecuteAttempted,
 		AuditActionExecuteNotImplemented,
+		AuditActionExecuteStarted,
+		AuditActionExecuteWriteSucceeded,
+		AuditActionExecuteWriteFailed,
+		AuditActionExecuteVerified,
+		AuditActionExecuteVerificationFailed,
+		AuditActionExecuteRollbackStarted,
+		AuditActionExecuteRollbackSucceeded,
+		AuditActionExecuteRollbackFailed,
 	}
 }
