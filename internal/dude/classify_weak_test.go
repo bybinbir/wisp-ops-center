@@ -266,6 +266,22 @@ func TestWeak_LowConfidencePrimaryStillWeakBucket(t *testing.T) {
 	}
 }
 
+
+
+func TestWeak_AP_OmnTokenMatchesViaFallback(t *testing.T) {
+	// R3 tuning: lab data shows "OMN" / "OMN2" suffix is operator's
+	// shorthand for an AP/omni device (12 devices observed in the
+	// 194.15.45.62 dataset). Adding "omn" to the AP token list.
+	d := &DiscoveredDevice{Name: "596_KADILAR_OMN"}
+	Classify(d)
+	if d.Classification.Category != CategoryAP {
+		t.Fatalf("got %q, want AP (omn token)", d.Classification.Category)
+	}
+	if d.Classification.Confidence != 45 {
+		t.Fatalf("confidence = %d, want 45", d.Classification.Confidence)
+	}
+}
+
 func hasEvidenceHeuristic(d *DiscoveredDevice, h string) bool {
 	for _, e := range d.Classification.Evidences {
 		if e.Heuristic == h {

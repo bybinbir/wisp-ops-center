@@ -45,7 +45,7 @@ var weakPatternGroups = []weakPatternGroup{
 		Category: CategoryAP,
 		Tokens: []string{
 			"ap", "sektor", "sektör", "sector", "tower", "kule",
-			"baz", "base", "omni", "wifi", "wlan",
+			"baz", "base", "omni", "omn", "wifi", "wlan",
 		},
 		// Reason text shown in evidence row + EvidenceModal.
 		Reason: "İsim pattern'i AP/sektör/kule kelimeleri içeriyor",
