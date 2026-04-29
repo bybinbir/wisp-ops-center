@@ -5,12 +5,15 @@ import (
 )
 
 // TestDestructiveAuditCatalog_Phase10C — Phase 10C added 3 events
-// to the catalog. Pin the count + the new names so a future edit
-// cannot quietly drop any of them.
+// to the catalog. Pin the names so a future edit cannot quietly
+// drop any of them. The catalog can only grow forward (Phase 10D
+// added two more execute-path events); the size assertion is a
+// lower bound, not an equality, so this test stays a Phase 10C
+// regression guard rather than a moving target.
 func TestDestructiveAuditCatalog_Phase10C(t *testing.T) {
 	got := DestructiveAuditCatalog()
-	if len(got) != 10 {
-		t.Errorf("catalog size = %d, want 10 (Phase 10A: 7 + Phase 10C: 3)", len(got))
+	if len(got) < 10 {
+		t.Errorf("catalog size = %d, want >= 10 (Phase 10A: 7 + Phase 10C: 3)", len(got))
 	}
 	must := map[DestructiveAuditAction]bool{
 		AuditActionConfirmed:                false,
